@@ -1,0 +1,55 @@
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccc ccc ccc l ccc ccc ccc}
+\toprule
+\multicolumn{10}{c}{\textbf{VLEO Train}} &
+\multicolumn{10}{c}{\textbf{LEO Train}} \\
+\cmidrule(lr){1-10}\cmidrule(lr){11-20}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} &
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}%
+\cmidrule(lr){12-14}\cmidrule(lr){15-17}\cmidrule(lr){18-20}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} &
+ & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{DT} & 0.2438 & 0.2437 & \textbf{0.2398} & \textbf{0.2688} & \textbf{0.2684} & \textbf{0.2619} & \textbf{0.3729} & \textbf{0.3583} & \textbf{0.3613} &   & \textbf{0.2562} & \textbf{0.2547} & \textbf{0.2509} & \textbf{0.2854} & \textbf{0.2937} & \textbf{0.2768} & \textbf{0.2917} & \textbf{0.3937} & 0.2481 \\
+\textbf{LSTM} & 0.2167 & 0.0580 & 0.0915 & 0.2500 & 0.1250 & 0.1405 & 0.1833 & 0.0729 & 0.0979 &   & 0.2167 & 0.1345 & 0.1503 & 0.2500 & 0.1250 & 0.1652 & 0.2500 & 0.2500 & 0.2439 \\
+\textbf{S4} & \textbf{0.2479} & \textbf{0.2475} & 0.2364 & 0.2500 & 0.2487 & 0.2345 & 0.2562 & 0.2590 & 0.2513 &   & 0.2500 & 0.2500 & 0.2479 & 0.2542 & 0.2544 & 0.2529 & 0.2687 & 0.2688 & \textbf{0.2667} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Summary of Cartesian macro Precision (P), Recall (R), and F1 for VLEO and LEO train sets at 10/30/100 minutes. Bold = best per train/time/metric.}
+\label{tab:class_sum_macro_high_cart}
+\end{table}
+
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccc ccc ccc l ccc ccc ccc}
+\toprule
+\multicolumn{10}{c}{\textbf{VLEO Train}} &
+\multicolumn{10}{c}{\textbf{LEO Train}} \\
+\cmidrule(lr){1-10}\cmidrule(lr){11-20}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} &
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}%
+\cmidrule(lr){12-14}\cmidrule(lr){15-17}\cmidrule(lr){18-20}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} &
+ & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{DT} & \textbf{0.6479} & \textbf{0.6468} & \textbf{0.6473} & \textbf{0.7229} & \textbf{0.7177} & \textbf{0.7201} & \textbf{0.7854} & \textbf{0.7856} & \textbf{0.7853} &   & 0.4437 & 0.4883 & 0.4370 & 0.5979 & 0.6048 & 0.5784 & 0.5062 & 0.4227 & 0.4548 \\
+\textbf{LSTM} & 0.5229 & 0.5250 & 0.4936 & 0.5521 & 0.4286 & 0.4727 & 0.4021 & 0.4077 & 0.3625 &   & 0.6021 & 0.5918 & 0.5374 & \textbf{0.6979} & 0.6987 & 0.6850 & 0.4354 & 0.4913 & 0.3830 \\
+\textbf{S4} & 0.5979 & 0.5916 & 0.5812 & 0.6896 & 0.6897 & 0.6889 & 0.7292 & 0.7256 & 0.7224 &   & \textbf{0.6146} & \textbf{0.6012} & \textbf{0.6043} & \textbf{0.6979} & \textbf{0.7069} & \textbf{0.6956} & \textbf{0.7312} & \textbf{0.7288} & \textbf{0.7299} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Summary of OE macro Precision (P), Recall (R), and F1 for VLEO and LEO train sets at 10/30/100 minutes. Bold = best per train/time/metric.}
+\label{tab:class_sum_macro_high_oe}
+\end{table}

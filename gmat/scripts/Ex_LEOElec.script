@@ -1,0 +1,585 @@
+%General Mission Analysis Tool(GMAT) Script
+%Created: 2011-06-13 02:33:42
+
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft LEOsatElec;
+LEOsatElec.DateFormat = UTCGregorian;
+LEOsatElec.Epoch = '01 Jan 2000 11:59:28.000';
+LEOsatElec.CoordinateSystem = EarthMJ2000Eq;
+LEOsatElec.DisplayStateType = Keplerian;
+LEOsatElec.SMA = 6592.569999999995;
+LEOsatElec.ECC = 0.0004334530583440596;
+LEOsatElec.INC = 33.18999999999999;
+LEOsatElec.RAAN = 31.66;
+LEOsatElec.AOP = 146.1800000000017;
+LEOsatElec.TA = 332.3999999999983;
+LEOsatElec.DryMass = 74.5;
+LEOsatElec.Cd = 2.2;
+LEOsatElec.Cr = 1.8;
+LEOsatElec.DragArea = 2.78;
+LEOsatElec.SRPArea = 2.11;
+LEOsatElec.SPADDragScaleFactor = 1;
+LEOsatElec.SPADSRPScaleFactor = 1;
+LEOsatElec.AtmosDensityScaleFactor = 1;
+LEOsatElec.ExtendedMassPropertiesModel = 'None';
+LEOsatElec.Tanks = {ElectricTank1};
+LEOsatElec.Thrusters = {ElectricThruster1};
+LEOsatElec.PowerSystem = SolarPowerSystem1;
+LEOsatElec.NAIFId = -10006001;
+LEOsatElec.NAIFIdReferenceFrame = -9006001;
+LEOsatElec.OrbitColor = Red;
+LEOsatElec.TargetColor = Teal;
+LEOsatElec.OrbitErrorCovariance = [ 1e+70 0 0 0 0 0 ; 0 1e+70 0 0 0 0 ; 0 0 1e+70 0 0 0 ; 0 0 0 1e+70 0 0 ; 0 0 0 0 1e+70 0 ; 0 0 0 0 0 1e+70 ];
+LEOsatElec.CdSigma = 1e+70;
+LEOsatElec.CrSigma = 1e+70;
+LEOsatElec.Id = 'SatId';
+LEOsatElec.Attitude = CoordinateSystemFixed;
+LEOsatElec.SPADSRPInterpolationMethod = Bilinear;
+LEOsatElec.SPADSRPScaleFactorSigma = 1e+70;
+LEOsatElec.SPADDragInterpolationMethod = Bilinear;
+LEOsatElec.SPADDragScaleFactorSigma = 1e+70;
+LEOsatElec.AtmosDensityScaleFactorSigma = 1e+70;
+LEOsatElec.ModelFile = 'aura.3ds';
+LEOsatElec.ModelOffsetX = 0;
+LEOsatElec.ModelOffsetY = 0;
+LEOsatElec.ModelOffsetZ = 0;
+LEOsatElec.ModelRotationX = 0;
+LEOsatElec.ModelRotationY = 0;
+LEOsatElec.ModelRotationZ = 0;
+LEOsatElec.ModelScale = 1;
+LEOsatElec.AttitudeDisplayStateType = 'Quaternion';
+LEOsatElec.AttitudeRateDisplayStateType = 'AngularVelocity';
+LEOsatElec.AttitudeCoordinateSystem = EarthMJ2000Eq;
+LEOsatElec.EulerAngleSequence = '321';
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft LEOsatChem;
+LEOsatChem.DateFormat = UTCGregorian;
+LEOsatChem.Epoch = '01 Jan 2000 11:59:28.000';
+LEOsatChem.CoordinateSystem = EarthMJ2000Eq;
+LEOsatChem.DisplayStateType = Keplerian;
+LEOsatChem.SMA = 6592.569999999995;
+LEOsatChem.ECC = 0.0004334530583440596;
+LEOsatChem.INC = 33.18999999999999;
+LEOsatChem.RAAN = 31.66;
+LEOsatChem.AOP = 146.1800000000017;
+LEOsatChem.TA = 332.3999999999983;
+LEOsatChem.DryMass = 74.5;
+LEOsatChem.Cd = 2.2;
+LEOsatChem.Cr = 1.8;
+LEOsatChem.DragArea = 2.78;
+LEOsatChem.SRPArea = 2.11;
+LEOsatChem.SPADDragScaleFactor = 1;
+LEOsatChem.SPADSRPScaleFactor = 1;
+LEOsatChem.AtmosDensityScaleFactor = 1;
+LEOsatChem.ExtendedMassPropertiesModel = 'None';
+LEOsatChem.Tanks = {ChemicalTank1};
+LEOsatChem.Thrusters = {ChemicalThruster1};
+LEOsatChem.NAIFId = -10006001;
+LEOsatChem.NAIFIdReferenceFrame = -9006001;
+LEOsatChem.OrbitColor = Red;
+LEOsatChem.TargetColor = Teal;
+LEOsatChem.OrbitErrorCovariance = [ 1e+70 0 0 0 0 0 ; 0 1e+70 0 0 0 0 ; 0 0 1e+70 0 0 0 ; 0 0 0 1e+70 0 0 ; 0 0 0 0 1e+70 0 ; 0 0 0 0 0 1e+70 ];
+LEOsatChem.CdSigma = 1e+70;
+LEOsatChem.CrSigma = 1e+70;
+LEOsatChem.Id = 'SatId';
+LEOsatChem.Attitude = CoordinateSystemFixed;
+LEOsatChem.SPADSRPInterpolationMethod = Bilinear;
+LEOsatChem.SPADSRPScaleFactorSigma = 1e+70;
+LEOsatChem.SPADDragInterpolationMethod = Bilinear;
+LEOsatChem.SPADDragScaleFactorSigma = 1e+70;
+LEOsatChem.AtmosDensityScaleFactorSigma = 1e+70;
+LEOsatChem.ModelFile = 'aura.3ds';
+LEOsatChem.ModelOffsetX = 0;
+LEOsatChem.ModelOffsetY = 0;
+LEOsatChem.ModelOffsetZ = 0;
+LEOsatChem.ModelRotationX = 0;
+LEOsatChem.ModelRotationY = 0;
+LEOsatChem.ModelRotationZ = 0;
+LEOsatChem.ModelScale = 1;
+LEOsatChem.AttitudeDisplayStateType = 'Quaternion';
+LEOsatChem.AttitudeRateDisplayStateType = 'AngularVelocity';
+LEOsatChem.AttitudeCoordinateSystem = EarthMJ2000Eq;
+LEOsatChem.EulerAngleSequence = '321';
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft LEOsatNoThrust;
+LEOsatNoThrust.DateFormat = UTCGregorian;
+LEOsatNoThrust.Epoch = '01 Jan 2000 11:59:28.000';
+LEOsatNoThrust.CoordinateSystem = EarthMJ2000Eq;
+LEOsatNoThrust.DisplayStateType = Keplerian;
+LEOsatNoThrust.SMA = 6592.569999999995;
+LEOsatNoThrust.ECC = 0.0004334530583440596;
+LEOsatNoThrust.INC = 33.18999999999999;
+LEOsatNoThrust.RAAN = 31.66;
+LEOsatNoThrust.AOP = 146.1800000000017;
+LEOsatNoThrust.TA = 332.3999999999983;
+LEOsatNoThrust.DryMass = 74.5;
+LEOsatNoThrust.Cd = 2.2;
+LEOsatNoThrust.Cr = 1.8;
+LEOsatNoThrust.DragArea = 2.78;
+LEOsatNoThrust.SRPArea = 2.11;
+LEOsatNoThrust.SPADDragScaleFactor = 1;
+LEOsatNoThrust.SPADSRPScaleFactor = 1;
+LEOsatNoThrust.AtmosDensityScaleFactor = 1;
+LEOsatNoThrust.ExtendedMassPropertiesModel = 'None';
+LEOsatNoThrust.Tanks = {NoThrustTank};
+LEOsatNoThrust.NAIFId = -10006001;
+LEOsatNoThrust.NAIFIdReferenceFrame = -9006001;
+LEOsatNoThrust.OrbitColor = Red;
+LEOsatNoThrust.TargetColor = Teal;
+LEOsatNoThrust.OrbitErrorCovariance = [ 1e+70 0 0 0 0 0 ; 0 1e+70 0 0 0 0 ; 0 0 1e+70 0 0 0 ; 0 0 0 1e+70 0 0 ; 0 0 0 0 1e+70 0 ; 0 0 0 0 0 1e+70 ];
+LEOsatNoThrust.CdSigma = 1e+70;
+LEOsatNoThrust.CrSigma = 1e+70;
+LEOsatNoThrust.Id = 'SatId';
+LEOsatNoThrust.Attitude = CoordinateSystemFixed;
+LEOsatNoThrust.SPADSRPInterpolationMethod = Bilinear;
+LEOsatNoThrust.SPADSRPScaleFactorSigma = 1e+70;
+LEOsatNoThrust.SPADDragInterpolationMethod = Bilinear;
+LEOsatNoThrust.SPADDragScaleFactorSigma = 1e+70;
+LEOsatNoThrust.AtmosDensityScaleFactorSigma = 1e+70;
+LEOsatNoThrust.ModelFile = 'aura.3ds';
+LEOsatNoThrust.ModelOffsetX = 0;
+LEOsatNoThrust.ModelOffsetY = 0;
+LEOsatNoThrust.ModelOffsetZ = 0;
+LEOsatNoThrust.ModelRotationX = 0;
+LEOsatNoThrust.ModelRotationY = 0;
+LEOsatNoThrust.ModelRotationZ = 0;
+LEOsatNoThrust.ModelScale = 1;
+LEOsatNoThrust.AttitudeDisplayStateType = 'Quaternion';
+LEOsatNoThrust.AttitudeRateDisplayStateType = 'AngularVelocity';
+LEOsatNoThrust.AttitudeCoordinateSystem = EarthMJ2000Eq;
+LEOsatNoThrust.EulerAngleSequence = '321';
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft LEOsatImp;
+LEOsatImp.DateFormat = UTCGregorian;
+LEOsatImp.Epoch = '01 Jan 2000 11:59:28.000';
+LEOsatImp.CoordinateSystem = EarthMJ2000Eq;
+LEOsatImp.DisplayStateType = Keplerian;
+LEOsatImp.SMA = 6592.569999999995;
+LEOsatImp.ECC = 0.0004334530583440596;
+LEOsatImp.INC = 33.18999999999999;
+LEOsatImp.RAAN = 31.66;
+LEOsatImp.AOP = 146.1800000000017;
+LEOsatImp.TA = 332.3999999999983;
+LEOsatImp.DryMass = 74.5;
+LEOsatImp.Cd = 2.2;
+LEOsatImp.Cr = 1.8;
+LEOsatImp.DragArea = 2.78;
+LEOsatImp.SRPArea = 2.11;
+LEOsatImp.SPADDragScaleFactor = 1;
+LEOsatImp.SPADSRPScaleFactor = 1;
+LEOsatImp.AtmosDensityScaleFactor = 1;
+LEOsatImp.ExtendedMassPropertiesModel = 'None';
+LEOsatImp.NAIFId = -10006001;
+LEOsatImp.NAIFIdReferenceFrame = -9006001;
+LEOsatImp.OrbitColor = Red;
+LEOsatImp.TargetColor = Teal;
+LEOsatImp.OrbitErrorCovariance = [ 1e+70 0 0 0 0 0 ; 0 1e+70 0 0 0 0 ; 0 0 1e+70 0 0 0 ; 0 0 0 1e+70 0 0 ; 0 0 0 0 1e+70 0 ; 0 0 0 0 0 1e+70 ];
+LEOsatImp.CdSigma = 1e+70;
+LEOsatImp.CrSigma = 1e+70;
+LEOsatImp.Id = 'SatId';
+LEOsatImp.Attitude = CoordinateSystemFixed;
+LEOsatImp.SPADSRPInterpolationMethod = Bilinear;
+LEOsatImp.SPADSRPScaleFactorSigma = 1e+70;
+LEOsatImp.SPADDragInterpolationMethod = Bilinear;
+LEOsatImp.SPADDragScaleFactorSigma = 1e+70;
+LEOsatImp.AtmosDensityScaleFactorSigma = 1e+70;
+LEOsatImp.ModelFile = 'aura.3ds';
+LEOsatImp.ModelOffsetX = 0;
+LEOsatImp.ModelOffsetY = 0;
+LEOsatImp.ModelOffsetZ = 0;
+LEOsatImp.ModelRotationX = 0;
+LEOsatImp.ModelRotationY = 0;
+LEOsatImp.ModelRotationZ = 0;
+LEOsatImp.ModelScale = 1;
+LEOsatImp.AttitudeDisplayStateType = 'Quaternion';
+LEOsatImp.AttitudeRateDisplayStateType = 'AngularVelocity';
+LEOsatImp.AttitudeCoordinateSystem = EarthMJ2000Eq;
+LEOsatImp.EulerAngleSequence = '321';
+
+%----------------------------------------
+%---------- Hardware Components
+%----------------------------------------
+
+Create SolarPowerSystem SolarPowerSystem1;
+SolarPowerSystem1.EpochFormat = 'UTCGregorian';
+SolarPowerSystem1.InitialEpoch = ''01 Jan 2000 11:59:28.000'';
+SolarPowerSystem1.InitialMaxPower = 1.2;
+SolarPowerSystem1.AnnualDecayRate = 5;
+SolarPowerSystem1.Margin = 5;
+SolarPowerSystem1.BusCoeff1 = 0.3;
+SolarPowerSystem1.BusCoeff2 = 0;
+SolarPowerSystem1.BusCoeff3 = 0;
+SolarPowerSystem1.ShadowModel = 'DualCone';
+SolarPowerSystem1.ShadowBodies = {'Earth'};
+SolarPowerSystem1.SolarCoeff1 = 1.32077;
+SolarPowerSystem1.SolarCoeff2 = -0.10848;
+SolarPowerSystem1.SolarCoeff3 = -0.11665;
+SolarPowerSystem1.SolarCoeff4 = 0.10843;
+SolarPowerSystem1.SolarCoeff5 = -0.01279;
+
+Create ElectricTank ElectricTank1;
+ElectricTank1.DirectionX = 0;
+ElectricTank1.DirectionY = 0;
+ElectricTank1.DirectionZ = 1;
+ElectricTank1.SecondDirectionX = 0;
+ElectricTank1.SecondDirectionY = -1;
+ElectricTank1.SecondDirectionZ = 0;
+ElectricTank1.HWOriginInBCSX = 0;
+ElectricTank1.HWOriginInBCSY = 0;
+ElectricTank1.HWOriginInBCSZ = 0;
+ElectricTank1.AllowNegativeFuelMass = false;
+ElectricTank1.FuelMass = 756;
+ElectricTank1.FuelCenterOfMassX = 0;
+ElectricTank1.FuelCenterOfMassY = 0;
+ElectricTank1.FuelCenterOfMassZ = 0;
+ElectricTank1.FuelMomentOfInertiaXX = 99;
+ElectricTank1.FuelMomentOfInertiaXY = 0;
+ElectricTank1.FuelMomentOfInertiaXZ = 0;
+ElectricTank1.FuelMomentOfInertiaYY = 99;
+ElectricTank1.FuelMomentOfInertiaYZ = 0;
+ElectricTank1.FuelMomentOfInertiaZZ = 99;
+
+Create ElectricThruster ElectricThruster1;
+ElectricThruster1.HWOriginInBCSX = 0;
+ElectricThruster1.HWOriginInBCSY = 0;
+ElectricThruster1.HWOriginInBCSZ = 0;
+ElectricThruster1.CoordinateSystem = Local;
+ElectricThruster1.Origin = Earth;
+ElectricThruster1.Axes = VNB;
+ElectricThruster1.ThrustDirection1 = 1;
+ElectricThruster1.ThrustDirection2 = 0;
+ElectricThruster1.ThrustDirection3 = 0;
+ElectricThruster1.DutyCycle = 1;
+ElectricThruster1.ThrustScaleFactor = 1;
+ElectricThruster1.DecrementMass = false;
+ElectricThruster1.Tank = {ElectricTank1};
+ElectricThruster1.MixRatio = [ 1 ];
+ElectricThruster1.GravitationalAccel = 9.81;
+ElectricThruster1.ThrustModel = ConstantThrustAndIsp;
+ElectricThruster1.MaximumUsablePower = 7.266;
+ElectricThruster1.MinimumUsablePower = 0.638;
+ElectricThruster1.ThrustCoeff1 = -5.19082;
+ElectricThruster1.ThrustCoeff2 = 2.96519;
+ElectricThruster1.ThrustCoeff3 = -14.4789;
+ElectricThruster1.ThrustCoeff4 = 54.05382;
+ElectricThruster1.ThrustCoeff5 = -0.00100092;
+ElectricThruster1.MassFlowCoeff1 = -0.004776;
+ElectricThruster1.MassFlowCoeff2 = 0.05717;
+ElectricThruster1.MassFlowCoeff3 = -0.09956;
+ElectricThruster1.MassFlowCoeff4 = 0.03211;
+ElectricThruster1.MassFlowCoeff5 = 2.13781;
+ElectricThruster1.FixedEfficiency = 0.7;
+ElectricThruster1.Isp = 2800;
+ElectricThruster1.ConstantThrust = 0.1;
+
+Create ChemicalTank ChemicalTank1;
+ChemicalTank1.DirectionX = 0;
+ChemicalTank1.DirectionY = 0;
+ChemicalTank1.DirectionZ = 1;
+ChemicalTank1.SecondDirectionX = 0;
+ChemicalTank1.SecondDirectionY = -1;
+ChemicalTank1.SecondDirectionZ = 0;
+ChemicalTank1.HWOriginInBCSX = 0;
+ChemicalTank1.HWOriginInBCSY = 0;
+ChemicalTank1.HWOriginInBCSZ = 0;
+ChemicalTank1.AllowNegativeFuelMass = false;
+ChemicalTank1.FuelMass = 756;
+ChemicalTank1.FuelCenterOfMassX = 0;
+ChemicalTank1.FuelCenterOfMassY = 0;
+ChemicalTank1.FuelCenterOfMassZ = 0;
+ChemicalTank1.FuelMomentOfInertiaXX = 99;
+ChemicalTank1.FuelMomentOfInertiaXY = 0;
+ChemicalTank1.FuelMomentOfInertiaXZ = 0;
+ChemicalTank1.FuelMomentOfInertiaYY = 99;
+ChemicalTank1.FuelMomentOfInertiaYZ = 0;
+ChemicalTank1.FuelMomentOfInertiaZZ = 99;
+ChemicalTank1.Pressure = 1500;
+ChemicalTank1.Temperature = 20;
+ChemicalTank1.RefTemperature = 20;
+ChemicalTank1.Volume = 0.75;
+ChemicalTank1.FuelDensity = 1260;
+ChemicalTank1.PressureModel = PressureRegulated;
+
+Create ChemicalThruster ChemicalThruster1;
+ChemicalThruster1.HWOriginInBCSX = 0;
+ChemicalThruster1.HWOriginInBCSY = 0;
+ChemicalThruster1.HWOriginInBCSZ = 0;
+ChemicalThruster1.CoordinateSystem = Local;
+ChemicalThruster1.Origin = Earth;
+ChemicalThruster1.Axes = VNB;
+ChemicalThruster1.ThrustDirection1 = 1;
+ChemicalThruster1.ThrustDirection2 = 0;
+ChemicalThruster1.ThrustDirection3 = 0;
+ChemicalThruster1.DutyCycle = 1;
+ChemicalThruster1.ThrustScaleFactor = 1;
+ChemicalThruster1.DecrementMass = false;
+ChemicalThruster1.Tank = {ChemicalTank1};
+ChemicalThruster1.MixRatio = [ 1 ];
+ChemicalThruster1.GravitationalAccel = 9.81;
+ChemicalThruster1.C1 = 10;
+ChemicalThruster1.C2 = 0;
+ChemicalThruster1.C3 = 0;
+ChemicalThruster1.C4 = 0;
+ChemicalThruster1.C5 = 0;
+ChemicalThruster1.C6 = 0;
+ChemicalThruster1.C7 = 0;
+ChemicalThruster1.C8 = 0;
+ChemicalThruster1.C9 = 0;
+ChemicalThruster1.C10 = 0;
+ChemicalThruster1.C11 = 0;
+ChemicalThruster1.C12 = 0;
+ChemicalThruster1.C13 = 0;
+ChemicalThruster1.C14 = 0;
+ChemicalThruster1.C15 = 0;
+ChemicalThruster1.C16 = 0;
+ChemicalThruster1.K1 = 300;
+ChemicalThruster1.K2 = 0;
+ChemicalThruster1.K3 = 0;
+ChemicalThruster1.K4 = 0;
+ChemicalThruster1.K5 = 0;
+ChemicalThruster1.K6 = 0;
+ChemicalThruster1.K7 = 0;
+ChemicalThruster1.K8 = 0;
+ChemicalThruster1.K9 = 0;
+ChemicalThruster1.K10 = 0;
+ChemicalThruster1.K11 = 0;
+ChemicalThruster1.K12 = 0;
+ChemicalThruster1.K13 = 0;
+ChemicalThruster1.K14 = 0;
+ChemicalThruster1.K15 = 0;
+ChemicalThruster1.K16 = 0;
+
+Create ChemicalTank impTank;
+impTank.DirectionX = 0;
+impTank.DirectionY = 0;
+impTank.DirectionZ = 1;
+impTank.SecondDirectionX = 0;
+impTank.SecondDirectionY = -1;
+impTank.SecondDirectionZ = 0;
+impTank.HWOriginInBCSX = 0;
+impTank.HWOriginInBCSY = 0;
+impTank.HWOriginInBCSZ = 0;
+impTank.AllowNegativeFuelMass = false;
+impTank.FuelMass = 756;
+impTank.FuelCenterOfMassX = 0;
+impTank.FuelCenterOfMassY = 0;
+impTank.FuelCenterOfMassZ = 0;
+impTank.FuelMomentOfInertiaXX = 99;
+impTank.FuelMomentOfInertiaXY = 0;
+impTank.FuelMomentOfInertiaXZ = 0;
+impTank.FuelMomentOfInertiaYY = 99;
+impTank.FuelMomentOfInertiaYZ = 0;
+impTank.FuelMomentOfInertiaZZ = 99;
+impTank.Pressure = 1500;
+impTank.Temperature = 20;
+impTank.RefTemperature = 20;
+impTank.Volume = 0.75;
+impTank.FuelDensity = 1260;
+impTank.PressureModel = PressureRegulated;
+
+Create ChemicalTank NoThrustTank;
+NoThrustTank.DirectionX = 0;
+NoThrustTank.DirectionY = 0;
+NoThrustTank.DirectionZ = 1;
+NoThrustTank.SecondDirectionX = 0;
+NoThrustTank.SecondDirectionY = -1;
+NoThrustTank.SecondDirectionZ = 0;
+NoThrustTank.HWOriginInBCSX = 0;
+NoThrustTank.HWOriginInBCSY = 0;
+NoThrustTank.HWOriginInBCSZ = 0;
+NoThrustTank.AllowNegativeFuelMass = false;
+NoThrustTank.FuelMass = 756;
+NoThrustTank.FuelCenterOfMassX = 0;
+NoThrustTank.FuelCenterOfMassY = 0;
+NoThrustTank.FuelCenterOfMassZ = 0;
+NoThrustTank.FuelMomentOfInertiaXX = 99;
+NoThrustTank.FuelMomentOfInertiaXY = 0;
+NoThrustTank.FuelMomentOfInertiaXZ = 0;
+NoThrustTank.FuelMomentOfInertiaYY = 99;
+NoThrustTank.FuelMomentOfInertiaYZ = 0;
+NoThrustTank.FuelMomentOfInertiaZZ = 99;
+NoThrustTank.Pressure = 1500;
+NoThrustTank.Temperature = 20;
+NoThrustTank.RefTemperature = 20;
+NoThrustTank.Volume = 0.75;
+NoThrustTank.FuelDensity = 1260;
+NoThrustTank.PressureModel = PressureRegulated;
+
+
+
+%----------------------------------------
+%---------- ForceModels
+%----------------------------------------
+
+Create ForceModel LEOprop_ForceModel;
+LEOprop_ForceModel.CentralBody = Earth;
+LEOprop_ForceModel.PrimaryBodies = {Earth};
+LEOprop_ForceModel.PointMasses = {Luna, Sun};
+LEOprop_ForceModel.SRP = On;
+LEOprop_ForceModel.RelativisticCorrection = Off;
+LEOprop_ForceModel.ErrorControl = RSSStep;
+LEOprop_ForceModel.GravityField.Earth.Degree = 4;
+LEOprop_ForceModel.GravityField.Earth.Order = 4;
+LEOprop_ForceModel.GravityField.Earth.StmLimit = 100;
+LEOprop_ForceModel.GravityField.Earth.PotentialFile = 'JGM2.cof';
+LEOprop_ForceModel.GravityField.Earth.TideModel = 'None';
+LEOprop_ForceModel.Drag.AtmosphereModel = MSISE90;
+LEOprop_ForceModel.Drag.HistoricWeatherSource = 'ConstantFluxAndGeoMag';
+LEOprop_ForceModel.Drag.PredictedWeatherSource = 'ConstantFluxAndGeoMag';
+LEOprop_ForceModel.Drag.CSSISpaceWeatherFile = '../samples/SupportFiles/CSSI_2004To2026.txt';
+LEOprop_ForceModel.Drag.SchattenFile = 'SchattenPredict.txt';
+LEOprop_ForceModel.Drag.F107 = 150;
+LEOprop_ForceModel.Drag.F107A = 150;
+LEOprop_ForceModel.Drag.MagneticIndex = 3;
+LEOprop_ForceModel.Drag.SchattenErrorModel = 'Nominal';
+LEOprop_ForceModel.Drag.SchattenTimingModel = 'NominalCycle';
+LEOprop_ForceModel.Drag.DragModel = 'Spherical';
+LEOprop_ForceModel.SRP.Flux = 1367;
+LEOprop_ForceModel.SRP.SRPModel = Spherical;
+LEOprop_ForceModel.SRP.Nominal_Sun = 149597870.691;
+
+%----------------------------------------
+%---------- Propagators
+%----------------------------------------
+
+Create Propagator LEOprop;
+LEOprop.FM = LEOprop_ForceModel;
+LEOprop.Type = RungeKutta89;
+LEOprop.InitialStepSize = 60;
+LEOprop.Accuracy = 9.999999999999999e-12;
+LEOprop.MinStep = 0.001;
+LEOprop.MaxStep = 2700;
+LEOprop.MaxStepAttempts = 50;
+LEOprop.StopIfAccuracyIsViolated = true;
+
+%----------------------------------------
+%---------- Burns
+%----------------------------------------
+
+Create FiniteBurn DefaultFB;
+DefaultFB.Thrusters = {ElectricThruster1};
+DefaultFB.ThrottleLogicAlgorithm = 'MaxNumberOfThrusters';
+
+%----------------------------------------
+%---------- Burns
+%----------------------------------------
+
+Create FiniteBurn DefaultFB2;
+DefaultFB2.Thrusters = {ChemicalThruster1};
+DefaultFB2.ThrottleLogicAlgorithm = 'MaxNumberOfThrusters';
+
+Create ImpulsiveBurn ImpulsiveBurn1;
+ImpulsiveBurn1.CoordinateSystem = Local;
+ImpulsiveBurn1.Origin = Earth;
+ImpulsiveBurn1.Axes = VNB;
+ImpulsiveBurn1.Element1 = 0.05;
+ImpulsiveBurn1.Element2 = 0;
+ImpulsiveBurn1.Element3 = 0;
+ImpulsiveBurn1.DecrementMass = false;
+ImpulsiveBurn1.Tank = {impTank};
+ImpulsiveBurn1.Isp = 300;
+ImpulsiveBurn1.GravitationalAccel = 9.81;
+
+%----------------------------------------
+%---------- Subscribers
+%----------------------------------------
+
+Create OrbitView DefaultOrbitView;
+DefaultOrbitView.SolverIterations = Current;
+DefaultOrbitView.UpperLeft = [ 0.4032258064516129 0.4692597239648683 ];
+DefaultOrbitView.Size = [ 0.5 0.4491844416562108 ];
+DefaultOrbitView.RelativeZOrder = 2112;
+DefaultOrbitView.Maximized = false;
+DefaultOrbitView.Add = {LEOsatElec, Earth};
+DefaultOrbitView.CoordinateSystem = EarthMJ2000Eq;
+DefaultOrbitView.DrawObject = [ true true ];
+DefaultOrbitView.DataCollectFrequency = 1;
+DefaultOrbitView.UpdatePlotFrequency = 50;
+DefaultOrbitView.NumPointsToRedraw = 0;
+DefaultOrbitView.ShowPlot = true;
+DefaultOrbitView.MaxPlotPoints = 20000;
+DefaultOrbitView.ShowLabels = true;
+DefaultOrbitView.ViewPointReference = Earth;
+DefaultOrbitView.ViewPointVector = [ 0 0 30000 ];
+DefaultOrbitView.ViewDirection = Earth;
+DefaultOrbitView.ViewScaleFactor = 1;
+DefaultOrbitView.ViewUpCoordinateSystem = EarthMJ2000Eq;
+DefaultOrbitView.ViewUpAxis = Z;
+DefaultOrbitView.EclipticPlane = Off;
+DefaultOrbitView.XYPlane = On;
+DefaultOrbitView.WireFrame = Off;
+DefaultOrbitView.Axes = On;
+DefaultOrbitView.Grid = Off;
+DefaultOrbitView.SunLine = Off;
+DefaultOrbitView.UseInitialView = On;
+DefaultOrbitView.StarCount = 7000;
+DefaultOrbitView.EnableStars = On;
+DefaultOrbitView.EnableConstellations = On;
+
+Create XYPlot XYPlot1;
+XYPlot1.SolverIterations = Current;
+XYPlot1.UpperLeft = [ 0.4299007444168734 0 ];
+XYPlot1.Size = [ 0.5 0.4491844416562108 ];
+XYPlot1.RelativeZOrder = 2254;
+XYPlot1.Maximized = false;
+XYPlot1.XVariable = LEOsatElec.ElapsedSecs;
+XYPlot1.YVariables = {LEOsatElec.Earth.SMA, LEOsatChem.Earth.SMA, LEOsatNoThrust.Earth.SMA, LEOsatImp.Earth.SMA};
+XYPlot1.ShowGrid = true;
+XYPlot1.ShowPlot = true;
+
+Create XYPlot XYPlot2;
+XYPlot2.SolverIterations = Current;
+XYPlot2.UpperLeft = [ 0.02233250620347394 0.002509410288582183 ];
+XYPlot2.Size = [ 0.3753101736972705 0.4466750313676286 ];
+XYPlot2.RelativeZOrder = 2302;
+XYPlot2.Maximized = false;
+XYPlot2.XVariable = LEOsatElec.ElapsedSecs;
+XYPlot2.YVariables = {LEOsatElec.Earth.Altitude, LEOsatNoThrust.Earth.Altitude};
+XYPlot2.ShowGrid = true;
+XYPlot2.ShowPlot = true;
+
+Create XYPlot XYPlot3;
+XYPlot3.SolverIterations = Current;
+XYPlot3.UpperLeft = [ -0.008684863523573201 0.3851944792973651 ];
+XYPlot3.Size = [ 0.5409429280397022 0.5846925972396487 ];
+XYPlot3.RelativeZOrder = 1800;
+XYPlot3.Maximized = false;
+XYPlot3.XVariable = LEOsatElec.ElapsedSecs;
+XYPlot3.YVariables = {LEOsatElec.Earth.Energy, LEOsatChem.Earth.Energy, LEOsatNoThrust.Earth.Energy, LEOsatImp.Earth.Energy};
+XYPlot3.ShowGrid = true;
+XYPlot3.ShowPlot = true;
+
+%----------------------------------------
+%---------- Arrays, Variables, Strings
+%----------------------------------------
+Create Variable propLength;
+propLength = 1800;
+
+
+%----------------------------------------
+%---------- Mission Sequence
+%----------------------------------------
+
+BeginMissionSequence;
+BeginFiniteBurn 'Begin Elec Burn' DefaultFB(LEOsatElec);
+BeginFiniteBurn 'Begin Chem Burn' DefaultFB2(LEOsatChem);
+Propagate 'Before Imp Burn' Synchronized LEOprop(LEOsatImp) {LEOsatImp.ElapsedSecs = 900};
+Maneuver 'Imp' ImpulsiveBurn1(LEOsatImp);
+Propagate 'After Imp Burn' LEOprop(LEOsatImp) {LEOsatImp.ElapsedSecs = 900};
+Propagate 'Regular Prop' Synchronized LEOprop(LEOsatChem) LEOprop(LEOsatElec) LEOprop(LEOsatNoThrust) {LEOsatElec.ElapsedSecs = propLength};
