@@ -3,6 +3,7 @@ import numpy as np
 import casadi as ca
 import matplotlib.pyplot as plt
 
+# \work\grad school\classes\MS\3 - fall 2022\EAS 6415 - GNC\project 3\code\help\ContOCP_Duffing_FMINCON_Main.m
 
 def build_duffing_integrator_fixed_tf(alpha: float, beta: float, tf: float):
     """
