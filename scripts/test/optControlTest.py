@@ -1,366 +1,295 @@
 #!/usr/bin/env python3
-"""
-Free-final-state optimal control for a (controlled) Duffing oscillator via single-shooting.
-
-MATLAB -> Python mapping (one-to-one where possible):
----------------------------------------------------------------------------
-MATLAB main script lines:
-    x0 = [10;2];               --> x0 = np.array([10.0, 2.0])
-    xf = [0;0];                --> xf = np.array([0.0, 0.0])
-    tf = 2*pi;                 --> tf = 2*np.pi
-    alpha = 1; beta = 0.1;     --> alpha = 1.0; beta = 0.1
-    W = 1;                     --> W = 1.0  (interpreted as scalar times I_2)
-
-Shooting decision variable:
-    V0 = l0;                   --> l0_guess = np.ones(2)
-
-Optimizer call:
-    fmincon(@DuffingCostFrFS, ..., @(x) DuffingConstFrFS)
-                               --> scipy.optimize.minimize with equality constraint
-
-ODE integration:
-    ode45(@DuffingDyn, [0 tf], [x0; l0]) 
-                               --> solve_ivp(duffing_dyn, [0, tf], np.r_[x0, l0], ...)
-
-Control:
-    u = -X(:,4);               --> u = -lam2(t) = -X[3,:]  (0-based indexing)
-
-Constraints (free final state transversality, W=I):
-    ceq = [lam1(tf) - x1(tf) + xf1;
-           lam2(tf) - x2(tf) + xf2]
-                               --> same in Python
-
-Cost:
-    0.5*(x(tf)-xf)' W I (x(tf)-xf) + 0.5*trapz(T, u.^2)
-                               --> same with numpy.trapz
-
-Notes:
-- This keeps the exact structure of your MATLAB, including using an equality constraint *and* minimizing the cost.
-- For robustness, we sample a dense t-grid (t_eval) so that trapz is stable and plots match MATLAB aesthetics.
-- No analytical gradients are supplied; SLSQP is generally sufficient for this 2D decision variable.
-"""
-
 import numpy as np
-from numpy.typing import ArrayLike
-from scipy.integrate import solve_ivp
-from scipy.optimize import minimize
+import casadi as ca
 import matplotlib.pyplot as plt
 
 
-# ------------------------------------------
-# Dynamics (state + costate)  (MATLAB: DuffingDyn)
-# ------------------------------------------
-def duffing_dyn(t: float, X: ArrayLike, alpha: float, beta: float) -> np.ndarray:
+def build_duffing_integrator_fixed_tf(alpha: float, beta: float, tf: float):
     """
-    Canonical equations (Pontryagin) for controlled Duffing with quadratic control cost.
-
-    State:   x1, x2
-    Costate: lam1, lam2
-
-    MATLAB:
-      dx(1) = x(2)
-      dx(2) = -alpha*x(1) - beta*x(1)^3 - x(4)
-      dx(3) =  alpha*x(4) + 3*beta*x(1)^2*x(4)
-      dx(4) = -x(3)
-
-    Python mirrors the above exactly (0-based indices).
-    Control law used in the Hamiltonian minimization is u = -lam2, which is why lam2 enters x2 dynamics as "-x(4)".
+    Integrate canonical ODE over [0, tf] with fixed tf using CasADi integrator.
+    Augment with running-cost accumulator J where Jdot = 0.5*u^2 and u = -lam2.
+    State: [x1, x2, lam1, lam2, J]
     """
-    x1, x2, lam1, lam2 = X
+    x1, x2, lam1, lam2, J = ca.SX.sym("x1"), ca.SX.sym("x2"), ca.SX.sym("lam1"), ca.SX.sym("lam2"), ca.SX.sym("J")
+    X = ca.vertcat(x1, x2, lam1, lam2, J)
 
-    dx1   = x2
-    # Dynamics has control u with u = -lam2, hence the "-lam2" term below:
-    dx2   = -alpha * x1 - beta * (x1 ** 3) - lam2
-
-    # Costate dynamics from Hx partials:
-    dlam1 =  alpha * lam2 + 3.0 * beta * (x1 ** 2) * lam2
+    u = -lam2
+    dx1 = x2
+    dx2 = -alpha * x1 - beta * (x1**3) - lam2
+    dlam1 = alpha * lam2 + 3.0 * beta * (x1**2) * lam2
     dlam2 = -lam1
+    dJ = 0.5 * (u**2)
 
-    return np.array([dx1, dx2, dlam1, dlam2])
+    f = ca.Function("f", [X], [ca.vertcat(dx1, dx2, dlam1, dlam2, dJ)])
+
+    dae = {"x": X, "ode": f(X)}
+    opts = {
+        "tf": float(tf),
+        "abstol": 1e-10,
+        "reltol": 1e-8,
+    }
+    # cvodes is typically the most robust choice for smooth ODEs
+    F = ca.integrator("F", "cvodes", dae, opts)
+    return F
 
 
-# -------------------------------------------------------
-# Rollout given l0   (MATLAB: ode45(..., [x0; l0]))
-# -------------------------------------------------------
-def rollout(l0: ArrayLike, t0: float, tf: float, x0: ArrayLike, alpha: float, beta: float, num: int = 2001):
+def solve_free_final_state_casadi(x0, xf, tf, alpha, beta, W=1.0, l0_guess=(1.0, 1.0)):
     """
-    Integrate the canonical ODE from t0 to tf with initial state [x0; l0].
-
-    Returns (T, X) where:
-      T: shape (N,), time grid
-      X: shape (4,N), stacked [x1, x2, lam1, lam2] over time
-
-    Mirrors MATLAB's [T,X] = ode45(...), except we construct a dense fixed grid via t_eval for stable trapz and plotting.
+    Decision variable: l0 = [lam1(0), lam2(0)].
+    Integrate to tf, minimize:
+        0.5*(x(tf)-xf)' W (x(tf)-xf) + integral_0^tf 0.5*u^2 dt
+    subject to transversality:
+        lam(tf) = W*(x(tf)-xf)
+    (Your original code hard-coded W=I. This generalizes scalar W or 2x2 W.)
     """
-    Xinit = np.r_[np.asarray(x0, dtype=float), np.asarray(l0, dtype=float)]
-    t_eval = np.linspace(t0, tf, num)
+    x0 = np.asarray(x0, dtype=float).reshape(2)
+    xf = np.asarray(xf, dtype=float).reshape(2)
 
-    sol = solve_ivp(
-        fun=lambda t, X: duffing_dyn(t, X, alpha, beta),
-        t_span=(t0, tf),
-        y0=Xinit,
-        t_eval=t_eval,
-        rtol=1e-8,
-        atol=1e-10,
-        method="RK45",  # MATLAB uses ode45 ~ Dormand–Prince 4/5; RK45 is the direct analogue
-    )
-    if not sol.success:
-        raise RuntimeError(f"IVP solve failed: {sol.message}")
-
-    # sol.y has shape (4, N); transpose to (N, 4) when convenient
-    return sol.t, sol.y
-
-
-# --------------------------------------------------------
-# Cost (MATLAB: DuffingCostFrFS)
-# --------------------------------------------------------
-def cost_free_final(l0: ArrayLike, x0: ArrayLike, xf: ArrayLike, tf: float, alpha: float, beta: float, W: float | np.ndarray) -> float:
-    """
-    MATLAB:
-      f = 0.5*(X(end,1:2)'-xf)' * W*I * (X(end,1:2)'-xf) + 0.5*trapz(T, u.^2)
-
-    Here, W may be scalar or 2x2. We interpret scalar W as W*I_2.
-    u(t) = -lam2(t) = -X[3,:]
-    """
-    T, Y = rollout(l0, 0.0, tf, x0, alpha, beta)
-    x_tf = Y[0:2, -1]              # [x1(tf), x2(tf)]
-    lam2 = Y[3, :]                 # lam2(t)
-    u    = -lam2                   # control
-
-    e = x_tf - xf                  # terminal state error
     if np.isscalar(W):
-        term = 0.5 * W * float(e @ e)
+        Wm = float(W) * ca.SX.eye(2)
     else:
-        W = np.asarray(W, dtype=float)
-        term = 0.5 * float(e @ (W @ e))
+        Wm = ca.SX(np.asarray(W, dtype=float).reshape(2, 2))
 
-    running = 0.5 * float(np.trapz(u * u, x=T))
-    return term + running
+    F = build_duffing_integrator_fixed_tf(alpha, beta, tf)
+
+    l0 = ca.SX.sym("l0", 2)
+    Xinit = ca.vertcat(x0[0], x0[1], l0[0], l0[1], 0.0)  # J(0)=0
+    Xf = F(x0=Xinit)["xf"]
+
+    x_tf = Xf[0:2]
+    lam_tf = Xf[2:4]
+    Jrun = Xf[4]
+
+    e = x_tf - ca.SX(xf)
+    Jterm = 0.5 * ca.mtimes([e.T, Wm, e])
+    J = Jterm + Jrun
+
+    # transversality
+    g = lam_tf - ca.mtimes(Wm, e)
+
+    nlp = {"x": l0, "f": J, "g": g}
+    solver = ca.nlpsol(
+        "solver",
+        "ipopt",
+        nlp,
+        {
+            "ipopt.print_level": 0,
+            "print_time": 0,
+            "ipopt.tol": 1e-10,
+            "ipopt.constr_viol_tol": 1e-10,
+        },
+    )
+
+    sol = solver(
+        x0=np.asarray(l0_guess, dtype=float).reshape(2),
+        lbg=np.zeros(2),
+        ubg=np.zeros(2),
+    )
+    l0_star = np.array(sol["x"]).reshape(2)
+
+    # Dense rollout for plotting (simple fixed-step RK4 in casadi for speed/portability)
+    T, traj = rollout_dense_numeric(x0, l0_star, tf, alpha, beta, N=2001)
+    return l0_star, T, traj
 
 
-# -----------------------------------------------------------------
-# Equality constraints (MATLAB: DuffingConstFrFS)
-# -----------------------------------------------------------------
-def ceq_free_final(l0: ArrayLike, x0: ArrayLike, xf: ArrayLike, tf: float, alpha: float, beta: float) -> np.ndarray:
+def solve_min_time_fixed_final_state_casadi(x0, xf, alpha, beta, tf_guess=2*np.pi, l0_guess=(1.0, 1.0)):
     """
-    MATLAB:
-      ceq = [ X(end,3) - X(end,1) + xf(1);
-              X(end,4) - X(end,2) + xf(2) ];
-      (i.e., lam1(tf) = x1(tf) - xf1,  lam2(tf) = x2(tf) - xf2) with W = I
+    Minimum-time, fixed final state, free final time tf.
 
-    That matches the free-final-state transversality for terminal cost (1/2)*||x(tf)-xf||^2.
+    Decision variables: z = [lam1(0), lam2(0), tf]
+    Use time scaling tau in [0,1]:
+        dX/dtau = tf * f(X)
+    Running cost:
+        tf + integral_0^tf 0.5*u^2 dt
+      = tf + integral_0^1 tf * 0.5*u(tau)^2 d tau
+
+    Constraints:
+        x(tf) = xf
+        free-final-time condition: H(tf) + 1 = 0
+
+    NOTE: This implements the CORRECT Hamiltonian term lam1*x2.
+    If you insist on matching your original (likely wrong) c5, replace lam1_tf*x2_tf with lam1_tf*x1_tf.
     """
-    T, Y = rollout(l0, 0.0, tf, x0, alpha, beta)
-    x1_tf, x2_tf = Y[0, -1], Y[1, -1]
-    lam1_tf, lam2_tf = Y[2, -1], Y[3, -1]
+    x0 = np.asarray(x0, dtype=float).reshape(2)
+    xf = np.asarray(xf, dtype=float).reshape(2)
 
-    # Enforce exactly zero:
-    c1 = lam1_tf - x1_tf + xf[0]
-    c2 = lam2_tf - x2_tf + xf[1]
-    return np.array([c1, c2], dtype=float)
+    # symbolic state (no explicit time)
+    x1, x2, lam1, lam2, J = ca.SX.sym("x1"), ca.SX.sym("x2"), ca.SX.sym("lam1"), ca.SX.sym("lam2"), ca.SX.sym("J")
+    X = ca.vertcat(x1, x2, lam1, lam2, J)
+    u = -lam2
+
+    # physical-time dynamics
+    dx1 = x2
+    dx2 = -alpha * x1 - beta * (x1**3) - lam2
+    dlam1 = alpha * lam2 + 3.0 * beta * (x1**2) * lam2
+    dlam2 = -lam1
+    dJ_phys = 0.5 * (u**2)
+    f_phys = ca.vertcat(dx1, dx2, dlam1, dlam2, dJ_phys)
+
+    tf_var = ca.SX.sym("tf")
+    ode_tau = tf_var * f_phys  # time-scaled
+    dae = {"x": X, "p": tf_var, "ode": ode_tau}
+
+    # integrate over tau in [0,1]
+    F = ca.integrator(
+        "FminT",
+        "cvodes",
+        dae,
+        {
+            "tf": 1.0,
+            "abstol": 1e-10,
+            "reltol": 1e-8,
+        },
+    )
+
+    lam0 = ca.SX.sym("lam0", 2)
+    z = ca.vertcat(lam0, tf_var)
+
+    Xinit = ca.vertcat(x0[0], x0[1], lam0[0], lam0[1], 0.0)
+    Xf = F(x0=Xinit, p=tf_var)["xf"]
+
+    x_tf = Xf[0:2]
+    lam_tf = Xf[2:4]
+    Jrun = Xf[4]
+
+    # Objective: tf + running integral (already in Jrun because Jdot = 0.5 u^2 in physical time,
+    # but we used tau dynamics, so Jrun currently equals integral_0^1 tf*0.5*u^2 d tau = integral_0^tf 0.5*u^2 dt.
+    J = tf_var + Jrun
+
+    # Fixed-final-state constraints
+    g1 = x_tf - ca.SX(xf)
+
+    # Free-final-time Hamiltonian condition:
+    # H = 0.5*u^2 + lam1*x2 + lam2*(-alpha*x1 - beta*x1^3 + u) + 1, with u = -lam2
+    # Your dynamics uses dx2 = ... - lam2, so u=-lam2 is consistent.
+    x1_tf, x2_tf = x_tf[0], x_tf[1]
+    lam1_tf, lam2_tf = lam_tf[0], lam_tf[1]
+
+    # Correct Hamiltonian (lam1*x2 term):
+    H_tf = 0.5 * (lam2_tf**2) + lam1_tf * x2_tf + lam2_tf * (-alpha * x1_tf - beta * (x1_tf**3) - lam2_tf)
+    gH = H_tf + 1.0
+
+    g = ca.vertcat(g1, gH)
+
+    nlp = {"x": z, "f": J, "g": g}
+    solver = ca.nlpsol(
+        "solver_minT",
+        "ipopt",
+        nlp,
+        {
+            "ipopt.print_level": 0,
+            "print_time": 0,
+            "ipopt.tol": 1e-10,
+            "ipopt.constr_viol_tol": 1e-10,
+        },
+    )
+
+    z0 = np.array([l0_guess[0], l0_guess[1], tf_guess], dtype=float)
+    lbx = np.array([-ca.inf, -ca.inf, 1e-6], dtype=float)  # keep tf positive
+    ubx = np.array([ ca.inf,  ca.inf, 1e6], dtype=float)
+
+    sol = solver(
+        x0=z0,
+        lbx=lbx,
+        ubx=ubx,
+        lbg=np.zeros(3),
+        ubg=np.zeros(3),
+    )
+    z_star = np.array(sol["x"]).reshape(3)
+    lam0_star = z_star[0:2]
+    tf_star = float(z_star[2])
+
+    T, traj = rollout_dense_numeric(x0, lam0_star, tf_star, alpha, beta, N=2001)
+    return lam0_star, tf_star, T, traj
 
 
-# ---------------------------------------
-# Solve the shooting problem (MATLAB FM)
-# ---------------------------------------
-def solve_free_final(x0, xf, tf, alpha, beta, W, l0_guess):
+def rollout_dense_numeric(x0, l0, tf, alpha, beta, N=2001):
     """
-    Replicates the MATLAB fmincon call:
-
-    [V_FM_FrFS, ~] = fmincon(@DuffingCostFrFS, l0_guess, ... , @(x) DuffingConstFrFS(...))
-
-    We use SLSQP with an equality constraint. No gradients are provided (small 2D problem).
+    Dense numeric rollout for plotting using RK4 on the canonical ODE (no CasADi integrator calls in a loop).
+    State: [x1, x2, lam1, lam2]
     """
-    def fun(l0):
-        return cost_free_final(l0, x0, xf, tf, alpha, beta, W)
+    x0 = np.asarray(x0, float).reshape(2)
+    l0 = np.asarray(l0, float).reshape(2)
 
-    # Equality constraint ceq(l0) = 0
-    cons = {
-        "type": "eq",
-        "fun": lambda l0: ceq_free_final(l0, x0, xf, tf, alpha, beta),
-    }
+    T = np.linspace(0.0, float(tf), int(N))
+    dt = T[1] - T[0]
+    Y = np.zeros((4, int(N)), dtype=float)
+    Y[:, 0] = np.array([x0[0], x0[1], l0[0], l0[1]], dtype=float)
 
-    from scipy.optimize import NonlinearConstraint
-    nlc = NonlinearConstraint(lambda l0: ceq_free_final(l0, x0, xf, tf, alpha, beta),
-                            lb=np.zeros(2), ub=np.zeros(2))
-    res = minimize(fun, l0_guess, method="trust-constr", constraints=[nlc],
-                options=dict(xtol=1e-9, verbose=0))
+    def f(y):
+        x1, x2, lam1, lam2 = y
+        dx1 = x2
+        dx2 = -alpha * x1 - beta * (x1**3) - lam2
+        dlam1 = alpha * lam2 + 3.0 * beta * (x1**2) * lam2
+        dlam2 = -lam1
+        return np.array([dx1, dx2, dlam1, dlam2], dtype=float)
 
-    if not res.success:
-        # Mirror MATLAB's habit of exposing exit info; do not soften the message.
-        raise RuntimeError(f"Optimization failed: {res.message} (status={res.status})")
+    for k in range(N - 1):
+        y = Y[:, k]
+        k1 = f(y)
+        k2 = f(y + 0.5 * dt * k1)
+        k3 = f(y + 0.5 * dt * k2)
+        k4 = f(y + dt * k3)
+        Y[:, k + 1] = y + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
-    return res.x, res
+    return T, Y
 
 
-
-
-
-def cost_min_time_fixed_final(l0: ArrayLike, x0: ArrayLike, xf: ArrayLike, tf: float, alpha: float, beta: float, W: float | np.ndarray) -> float:
-    """
-    MATLAB:
-      f  = tf + 0.5*trapz(T,u.^2);
-
-    u(t) = -lam2(t) = -X[3,:]
-    """
-    T, Y = rollout(l0, 0.0, tf, x0, alpha, beta)
-    x_tf = Y[0:2, -1]              # [x1(tf), x2(tf)]
-    lam2 = Y[3, :]                 # lam2(t)
-    u    = -lam2                   # control
-
-    term = tf
-
-    running = 0.5 * float(np.trapz(u * u, x=T))
-    return term + running
-
-def ceq_min_time_fixed_final(l0: ArrayLike, x0: ArrayLike, xf: ArrayLike, tf: float, alpha: float, beta: float) -> np.ndarray:
-    """
-    MATLAB:
-    ceq = [X(end,1) - xf(1); ...
-        X(end,2) - xf(2); ...
-        X(end,3) -  nu(1); ...
-        X(end,4) - nu(2); ...
-        0.5*X(end,4)^2 + X(end,3)*X(end,1) + X(end,4)*(-alpha*X(end,1) - beta*X(end,1)^3 - X(end,4)) + 1];
-
-    """
-    T, Y = rollout(l0, 0.0, tf, x0, alpha, beta)
-    x1_tf, x2_tf = Y[0, -1], Y[1, -1]
-    lam1_tf, lam2_tf = Y[2, -1], Y[3, -1]
-
-    # Enforce exactly zero:
-    c1 = x1_tf - xf[0]
-    c2 = x2_tf - xf[1]
-    c3 = lam1_tf - 0.0
-    c4 = lam2_tf - 0.0
-    c5 = 0.5 * lam2_tf**2 + lam1_tf * x1_tf + lam2_tf * (-alpha * x1_tf - beta * (x1_tf ** 3) - lam2_tf) + 1.0
-    return np.array([c1, c2, c3, c4, c5], dtype=float)
-
-def solve_min_time_fixed_final(x0, xf, tf, alpha, beta, W, l0_guess):
-    """
-    Replicates the MATLAB fmincon call:
-
-    [V_FM_FrFS, ~] = fmincon(@DuffingCostMTFxFS, l0_guess, ... , @(x) DuffingConstMTFxFS(...))
-
-    We use SLSQP with an equality constraint. No gradients are provided (small 2D problem).
-    """
-    def fun(l0):
-        return cost_min_time_fixed_final(l0, x0, xf, tf, alpha, beta, W)
-
-    # Equality constraint ceq(l0) = 0
-    cons = {
-        "type": "eq",
-        "fun": lambda l0: ceq_min_time_fixed_final(l0, x0, xf, tf, alpha, beta),
-    }
-
-    from scipy.optimize import NonlinearConstraint
-    nlc = NonlinearConstraint(lambda l0: ceq_min_time_fixed_final(l0, x0, xf, tf, alpha, beta),
-                            lb=np.zeros(5), ub=np.zeros(5))
-    res = minimize(fun, l0_guess, method="trust-constr", constraints=[nlc],
-                options=dict(xtol=1e-9, verbose=0))
-
-    if not res.success:
-        # Mirror MATLAB's habit of exposing exit info; do not soften the message.
-        raise RuntimeError(f"Optimization failed: {res.message} (status={res.status})")
-
-    return res.x, res
-
-# -------------
-# Run + Plot
-# -------------
 if __name__ == "__main__":
     # ---------------------------
-    # Problem setup (MATLAB block)
+    # Problem A: free final state
     # ---------------------------
-    x0 = np.array([10.0,  2.0])  # MATLAB: x0 = [10;2];
-    xf = np.array([ 0.0,  0.0])  # MATLAB: xf = [0;0];
-    tf = 2.0 * np.pi             # MATLAB: tf = 2*pi;
+    x0 = np.array([10.0, 2.0])
+    xf = np.array([0.0, 0.0])
+    tf = 2.0 * np.pi /3
+    alpha = 1.0
+    beta = 0.1
+    W = 1.0
 
-    alpha = 1.0                  # MATLAB: alpha = 1;
-    beta  = 0.1                  # MATLAB: beta  = 0.1;
-
-    W = 1.0                      # MATLAB: W = 1;  (scalar multiplying I_2)
-
-    l0 = np.array([1.0, 1.0])  # MATLAB: l0 = ones(2,1);
-    nu0 = np.array([0.0, 0.0])  # MATLAB: nu0 = zeros(2,1);
-
-
-
-    # Initial guess for costates l(0) = [lam1(0); lam2(0)] (MATLAB: l0 = ones(2,1))
-    l0_guess = l0
-
-    # Solve for optimal initial costate l0*
-    l0_star, opt_res = solve_free_final(x0, xf, tf, alpha, beta, W, l0_guess)
-
-    # Final rollout with optimal l0
-    T, Y = rollout(l0_star, 0.0, tf, x0, alpha, beta)
+    l0_star, T, Y = solve_free_final_state_casadi(
+        x0=x0, xf=xf, tf=tf, alpha=alpha, beta=beta, W=W, l0_guess=(1.0, 1.0)
+    )
     x1, x2, lam1, lam2 = Y
-    u = -lam2  # MATLAB: u = -X(:,4)
+    u = -lam2
 
-    # Diagnostics comparable to MATLAB
-    J = cost_free_final(l0_star, x0, xf, tf, alpha, beta, W)
-    ceq_val = ceq_free_final(l0_star, x0, xf, tf, alpha, beta)
+    print("Free-final-state:")
+    print("  l0* =", l0_star)
+    print("  terminal x =", np.array([x1[-1], x2[-1]]))
+    print("  terminal lam =", np.array([lam1[-1], lam2[-1]]))
 
-    print("Optimal l0* =", l0_star)
-    print("Equality constraint residuals (should be ~0):", ceq_val)
-    print("Optimal cost J =", J)
-
-    # Plot analogous to MATLAB:
-    # figure; plot(T,X(:,1),T,X(:,2),T,u); legend('x','x_d','u');
     plt.figure()
     plt.plot(T, x1, label="x1")
     plt.plot(T, x2, label="x2")
-    plt.plot(T, u,  label="u")
+    plt.plot(T, u, label="u")
     plt.xlabel("t")
     plt.legend()
     plt.title("State and Control (free final state)")
+    plt.grid()
     plt.tight_layout()
 
+    # ---------------------------------------
+    # Problem B: minimum time, fixed final
+    # ---------------------------------------
+    lam0_star, tf_star, T2, Y2 = solve_min_time_fixed_final_state_casadi(
+        x0=x0, xf=xf, alpha=alpha, beta=beta, tf_guess=tf, l0_guess=(1.0, 1.0)
+    )
+    x1b, x2b, lam1b, lam2b = Y2
+    ub = -lam2b
 
-    # ---------------------------
-    # Fixed final state problem
-    # ---------------------------
+    print("\nMin-time, fixed-final-state (free tf):")
+    print("  lam0* =", lam0_star)
+    print("  tf* =", tf_star)
+    print("  terminal x =", np.array([x1b[-1], x2b[-1]]))
+    print("  terminal lam =", np.array([lam1b[-1], lam2b[-1]]))
 
-    # reset initial conditions
-    x0 = np.array([10.0,  2.0])  # MATLAB: x0 = [10;2];
-    xf = np.array([ 0.0,  0.0])  # MATLAB: xf = [0;0];
-    tf = 2.0 * np.pi             # MATLAB: tf = 2*pi;
-
-    alpha = 1.0                  # MATLAB: alpha = 1;
-    beta  = 0.1                  # MATLAB: beta  = 0.1;
-
-    W = 1.0                      # MATLAB: W = 1;  (scalar multiplying I_2)
-
-    l0 = np.array([1.0, 1.0])  # MATLAB: l0 = ones(2,1);
-    nu0 = np.array([0.0, 0.0])  # MATLAB: nu0 = zeros(2,1);
-
-
-
-    l0_guess = [l0,nu0,tf]
-
-    # Solve for optimal initial costate l0*
-    l0_star, opt_res = solve_min_time_fixed_final(x0, xf, tf, alpha, beta, W, l0_guess)
-
-    # Final rollout with optimal l0
-    T, Y = rollout(l0_star, 0.0, tf, x0, alpha, beta)
-    x1, x2, lam1, lam2 = Y
-    u = -lam2  # MATLAB: u = -X(:,4)
-
-    # Diagnostics comparable to MATLAB
-    J = cost_min_time_fixed_final(l0_star, x0, xf, tf, alpha, beta, W)
-    ceq_val = ceq_min_time_fixed_final(l0_star, x0, xf, tf, alpha, beta)
-
-    print("Optimal l0* =", l0_star)
-    print("Equality constraint residuals (should be ~0):", ceq_val)
-    print("Optimal cost J =", J)
-
-    # Plot analogous to MATLAB:
-    # figure; plot(T,X(:,1),T,X(:,2),T,u); legend('x','x_d','u');
     plt.figure()
-    plt.plot(T, x1, label="x1")
-    plt.plot(T, x2, label="x2")
-    plt.plot(T, u,  label="u")
+    plt.plot(T2, x1b, label="x1")
+    plt.plot(T2, x2b, label="x2")
+    plt.plot(T2, ub, label="u")
     plt.xlabel("t")
     plt.legend()
     plt.title("State and Control (min time, fixed final state)")
     plt.tight_layout()
+    plt.grid()
+
     plt.show()
