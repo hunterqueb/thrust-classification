@@ -15,7 +15,10 @@ from scipy.spatial.qhull import QhullError # import here for p36 compatibility
 
 from qutils.ml.classifer import prepareThrustClassificationDatasets
 from qutils.ml.utils import getDevice, printModelParmSize
+from qutils.tictoc import timer
 
+import sys
+from contextlib import redirect_stdout, redirect_stderr
 
 CLASS_LABELS = ["No Thrust", "Chemical", "Electric", "Impulsive"]
 
@@ -387,12 +390,9 @@ def alpha_shape_faces_and_volume(points, edge_quantile=0.95):
     return points[boundary_faces], tet_vol[keep].sum()
 
 
-def main():
-    args = parse_args()
+def main(args):
     set_seed(args.seed)
 
-    args.save_dir = os.path.join(args.save_dir, datetime.now().strftime("%Y%m%d_%H%M%S"))
-    os.makedirs(args.save_dir, exist_ok=True)
     device = getDevice()
     test_orbit = args.test if args.test is not None else args.orbit
     plot_tag = f"{args.propMin}min_train-{args.orbit}_test-{test_orbit}" if not args.OE else f"{args.propMin}min_train-{args.orbit}_test-{test_orbit}_OE"
@@ -460,6 +460,7 @@ def main():
         norm_state = NormState(mu=ckpt["mu"], sig=ckpt["sig"])
         print("Checkpoint loaded successfully. Skipping training.")
     else:
+        trainTimer = timer()
         for epoch in range(args.epochs):
             model.train()
             running = 0.0
@@ -508,11 +509,13 @@ def main():
                 f"Epoch {epoch:03d} | train_loss={tr_loss:.5f} | "
                 f"val_cls_acc={100.0 * va_cls_acc:.2f}% | val_reg_rmse={va_reg_rmse:.5f} | lr={lr_now:.2e}"
             )
-
+        trainTimer.toc()
     ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(ckpt["model"])
 
+    testTimer = timer()
     te_cls_loss, te_cls_acc, te_reg_rmse = evaluate(model, test_loader, device)
+    testTimer.toc()
     print("\nFinal Test Metrics")
     print(f"Classification Loss: {te_cls_loss:.5f}")
     print(f"Classification Accuracy: {100.0 * te_cls_acc:.2f}%")
@@ -699,4 +702,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    args.save_dir = os.path.join(args.save_dir, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(args.save_dir, exist_ok=True)
+
+    log = os.path.join(args.save_dir, "log.txt")
+    with open(log, 'w', buffering=1, encoding='utf-8') as f, \
+        redirect_stdout(f), redirect_stderr(f):
+        main(args)
