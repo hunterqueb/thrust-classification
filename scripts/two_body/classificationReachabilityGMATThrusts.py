@@ -1,6 +1,7 @@
 import argparse
 import os
 from dataclasses import dataclass
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -49,6 +50,7 @@ def parse_args():
 
     parser.add_argument("--rollout_steps", type=int, default=40, help="Autoregressive rollout steps")
     parser.add_argument("--save_dir", type=str, default="plots/reachability_ensemble", help="Output directory")
+    parser.add_argument("--model_dir", type=str, default="plots/reachability_ensemble/models", help="Model checkpoint directory")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
 
     parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to model checkpoint to load (overrides training)")
@@ -389,6 +391,7 @@ def main():
     args = parse_args()
     set_seed(args.seed)
 
+    args.save_dir = os.path.join(args.save_dir, datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(args.save_dir, exist_ok=True)
     device = getDevice()
     test_orbit = args.test if args.test is not None else args.orbit
@@ -446,7 +449,7 @@ def main():
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=5)
 
     best_val = float("inf")
-    best_path = os.path.join(args.save_dir, f"{model_tag}_lstm_ensemble_best.pt")
+    best_path = os.path.join(args.model_dir, f"{model_tag}_lstm_ensemble_best.pt")
 
     load_model = args.load_checkpoint is not None and os.path.exists(args.load_checkpoint)
 
