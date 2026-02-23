@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument("--wd", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--clip", type=float, default=1.0, help="Gradient clipping")
 
-    parser.add_argument("--lookback", type=int, default=8, help="Lookback length for regression windows")
+    parser.add_argument("--lookback", type=int, default=4, help="Lookback length for regression windows")
     parser.add_argument("--hidden", type=int, default=96, help="LSTM hidden size")
     parser.add_argument("--layers", type=int, default=1, help="LSTM layers")
     parser.add_argument("--dropout", type=float, default=0.1, help="LSTM dropout")
@@ -139,6 +139,18 @@ class JointWindowDataset(data.Dataset):
         return self.x[idx], self.y_cls[idx], self.y_reg[idx]
 
 
+class TrajectoryDataset(data.Dataset):
+    def __init__(self, x, y_cls):
+        self.x = x
+        self.y_cls = y_cls
+
+    def __len__(self):
+        return self.x.shape[0]
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y_cls[idx]
+
+
 def infer_split_ratios(train_ratio: float):
     if abs(train_ratio - 0.7) < 1e-9:
         return 0.7, 0.15, 0.15
@@ -214,6 +226,17 @@ def build_regression_windows(trajs, labels, lookback):
     return x, y_cls, y_reg
 
 
+def split_trajectory_halves(trajs):
+    # split into first half (conditioning/training) and second half (rollout target)
+    t = trajs.shape[1]
+    split_idx = t // 2
+    if split_idx < 2:
+        raise ValueError(f"Trajectory length too short to split in half (T={t}).")
+    first_half = trajs[:, :split_idx, :]
+    second_half = trajs[:, split_idx:, :]
+    return first_half, second_half, split_idx
+
+
 def fit_normalizer(train_x):
     d = train_x.shape[-1]
     mu = train_x.reshape(-1, d).mean(axis=0)
@@ -233,23 +256,26 @@ def normalize_windows(x, y_reg, norm_state):
     return x_n, y_n
 
 
-def evaluate(model, loader, device):
+def normalize_trajectories(trajs, norm_state):
+    mu = norm_state.mu.numpy()
+    sig = norm_state.sig.numpy()
+    return (trajs - mu) / sig
+
+
+def evaluate_trajectory_classification(model, loader, device):
     model.eval()
     ce = nn.CrossEntropyLoss()
 
     total = 0
     cls_correct = 0
     loss_cls_sum = 0.0
-    reg_se_sum = 0.0
-    reg_count = 0
 
     with torch.no_grad():
-        for xb, yb_cls, yb_reg in loader:
+        for xb, yb_cls in loader:
             xb = xb.to(device)
             yb_cls = yb_cls.to(device)
-            yb_reg = yb_reg.to(device)
 
-            logits, _, mixed_pred = model(xb)
+            logits, _, _ = model(xb)
             loss_cls = ce(logits, yb_cls)
 
             pred_cls = torch.argmax(logits, dim=1)
@@ -257,24 +283,59 @@ def evaluate(model, loader, device):
             total += yb_cls.numel()
             loss_cls_sum += loss_cls.item() * yb_cls.numel()
 
+    cls_acc = cls_correct / max(1, total)
+    cls_loss = loss_cls_sum / max(1, total)
+    return cls_loss, cls_acc
+
+
+def evaluate_window_regression(model, loader, device):
+    model.eval()
+    reg_se_sum = 0.0
+    reg_count = 0
+
+    with torch.no_grad():
+        for xb, _, yb_reg in loader:
+            xb = xb.to(device)
+            yb_reg = yb_reg.to(device)
+            _, _, mixed_pred = model(xb)
             reg_se_sum += torch.sum((mixed_pred - yb_reg) ** 2).item()
             reg_count += yb_reg.numel()
 
-    cls_acc = cls_correct / max(1, total)
-    cls_loss = loss_cls_sum / max(1, total)
-    reg_rmse = np.sqrt(reg_se_sum / max(1, reg_count))
-    return cls_loss, cls_acc, reg_rmse
+    return np.sqrt(reg_se_sum / max(1, reg_count))
 
 
-def rollout_point_cloud(model, trajectories, labels, norm_state, lookback, rollout_steps, device):
+def predict_class_from_sliding_windows(model, trajectory, norm_state, lookback, device):
+    t = trajectory.shape[0]
+    if t < lookback:
+        raise ValueError("Not enough sequence length for sliding-window classification.")
+
+    mu = norm_state.mu.to(device)
+    sig = norm_state.sig.to(device)
+    traj_t = torch.tensor(trajectory, dtype=torch.float32, device=device)
+    traj_t = (traj_t - mu) / sig
+
+    logits_list = []
+    with torch.no_grad():
+        for start in range(0, t - lookback + 1):
+            window = traj_t[start : start + lookback, :].unsqueeze(0)
+            logits, _, _ = model(window)
+            logits_list.append(logits.squeeze(0))
+
+    mean_logits = torch.stack(logits_list, dim=0).mean(dim=0)
+    return int(torch.argmax(mean_logits).item())
+
+
+def rollout_point_cloud(model, trajectories, labels, norm_state, lookback, split_idx, rollout_steps, device):
     # trajectories: (N, T, D), labels: (N,)
     model.eval()
     mu = norm_state.mu.to(device)
     sig = norm_state.sig.to(device)
 
     n, t, d = trajectories.shape
-    if t < lookback:
-        raise ValueError("Not enough sequence length for rollout seed window.")
+    if split_idx < lookback:
+        raise ValueError("Not enough sequence length in first half for rollout seed window.")
+    if split_idx + rollout_steps > t:
+        raise ValueError("Requested rollout extends beyond trajectory length.")
 
     pred_states = []
     pred_classes = []
@@ -282,16 +343,26 @@ def rollout_point_cloud(model, trajectories, labels, norm_state, lookback, rollo
 
     with torch.no_grad():
         for i in range(n):
-            seed = torch.tensor(trajectories[i, :lookback, :], dtype=torch.float32, device=device)
+            pred_c = predict_class_from_sliding_windows(
+                model=model,
+                trajectory=trajectories[i, :split_idx, :],
+                norm_state=norm_state,
+                lookback=lookback,
+                device=device,
+            )
+            pred_classes.append(pred_c)
+
+            # seed rollout from the end of the first half so predictions target the second half
+            seed = torch.tensor(
+                trajectories[i, split_idx - lookback : split_idx, :],
+                dtype=torch.float32,
+                device=device,
+            )
             seed = (seed - mu) / sig
             window = seed.unsqueeze(0)  # (1, lookback, D)
 
-            logits, _, _ = model(window)
-            pred_c = int(torch.argmax(logits, dim=1).item())
-            pred_classes.append(pred_c)
-
             for _ in range(rollout_steps):
-                logits, _, mixed_pred = model(window)  # normalized prediction
+                _, _, mixed_pred = model(window)  # normalized prediction
                 pred_denorm = mixed_pred * sig + mu
                 pred_states.append(pred_denorm.squeeze(0).cpu().numpy())
 
@@ -400,14 +471,34 @@ def main(args):
 
     train_traj, train_lbl, val_traj, val_lbl, test_traj, test_lbl = load_classification_trajectories(args)
 
-    xtr, ytr_cls, ytr_reg = build_regression_windows(train_traj, train_lbl, args.lookback)
-    xva, yva_cls, yva_reg = build_regression_windows(val_traj, val_lbl, args.lookback)
-    xte, yte_cls, yte_reg = build_regression_windows(test_traj, test_lbl, args.lookback)
+    train_traj_first, train_traj_second, train_split = split_trajectory_halves(train_traj)
+    val_traj_first, val_traj_second, val_split = split_trajectory_halves(val_traj)
+    test_traj_first, test_traj_second, test_split = split_trajectory_halves(test_traj)
+    if not (train_split == val_split == test_split):
+        raise ValueError("Train/val/test trajectories do not share the same half-split index.")
+    half_idx = train_split
+
+    if train_traj_first.shape[1] <= args.lookback:
+        raise ValueError(
+            f"lookback ({args.lookback}) must be smaller than first-half length ({train_traj_first.shape[1]})."
+        )
+    print(
+        f"Using trajectory half-split at index {half_idx}: "
+        f"first half length={train_traj_first.shape[1]}, second half length={test_traj_second.shape[1]} "
+        f"(rollout length forced to second half)."
+    )
+
+    xtr, ytr_cls, ytr_reg = build_regression_windows(train_traj_first, train_lbl, args.lookback)
+    xva, yva_cls, yva_reg = build_regression_windows(val_traj_first, val_lbl, args.lookback)
+    xte, yte_cls, yte_reg = build_regression_windows(test_traj_first, test_lbl, args.lookback)
 
     norm_state = fit_normalizer(xtr)
     xtr, ytr_reg = normalize_windows(xtr, ytr_reg, norm_state)
     xva, yva_reg = normalize_windows(xva, yva_reg, norm_state)
     xte, yte_reg = normalize_windows(xte, yte_reg, norm_state)
+    train_traj_n = normalize_trajectories(train_traj_first, norm_state)
+    val_traj_n = normalize_trajectories(val_traj_first, norm_state)
+    test_traj_n = normalize_trajectories(test_traj_first, norm_state)
 
     train_ds = JointWindowDataset(
         torch.tensor(xtr, dtype=torch.float32),
@@ -424,10 +515,25 @@ def main(args):
         torch.tensor(yte_cls, dtype=torch.long),
         torch.tensor(yte_reg, dtype=torch.float32),
     )
+    train_cls_ds = TrajectoryDataset(
+        torch.tensor(train_traj_n, dtype=torch.float32),
+        torch.tensor(train_lbl, dtype=torch.long),
+    )
+    val_cls_ds = TrajectoryDataset(
+        torch.tensor(val_traj_n, dtype=torch.float32),
+        torch.tensor(val_lbl, dtype=torch.long),
+    )
+    test_cls_ds = TrajectoryDataset(
+        torch.tensor(test_traj_n, dtype=torch.float32),
+        torch.tensor(test_lbl, dtype=torch.long),
+    )
 
-    train_loader = data.DataLoader(train_ds, batch_size=args.batch, shuffle=True, pin_memory=True)
-    val_loader = data.DataLoader(val_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
-    test_loader = data.DataLoader(test_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
+    train_reg_loader = data.DataLoader(train_ds, batch_size=args.batch, shuffle=True, pin_memory=True)
+    val_reg_loader = data.DataLoader(val_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
+    test_reg_loader = data.DataLoader(test_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
+    train_cls_loader = data.DataLoader(train_cls_ds, batch_size=args.batch, shuffle=True, pin_memory=True)
+    val_cls_loader = data.DataLoader(val_cls_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
+    test_cls_loader = data.DataLoader(test_cls_ds, batch_size=args.batch, shuffle=False, pin_memory=True)
 
     input_size = train_traj.shape[-1]
     num_classes = 4
@@ -463,32 +569,47 @@ def main(args):
         trainTimer = timer()
         for epoch in range(args.epochs):
             model.train()
-            running = 0.0
-            seen = 0
+            running_cls = 0.0
+            running_reg = 0.0
+            seen_cls = 0
+            seen_reg = 0
 
-            for xb, yb_cls, yb_reg in train_loader:
+            for xb, yb_cls in train_cls_loader:
+                xb = xb.to(device)
+                yb_cls = yb_cls.to(device)
+
+                opt.zero_grad(set_to_none=True)
+                logits, _, _ = model(xb)
+                loss_cls = ce(logits, yb_cls)
+                loss_cls.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+                opt.step()
+
+                running_cls += loss_cls.item() * xb.size(0)
+                seen_cls += xb.size(0)
+
+            for xb, yb_cls, yb_reg in train_reg_loader:
                 xb = xb.to(device)
                 yb_cls = yb_cls.to(device)
                 yb_reg = yb_reg.to(device)
 
                 opt.zero_grad(set_to_none=True)
-
-                logits, expert_preds, _ = model(xb)
+                _, expert_preds, _ = model(xb)
 
                 expert_true = expert_preds[torch.arange(xb.size(0), device=device), yb_cls]  # (B, D)
-                loss_cls = ce(logits, yb_cls)
                 loss_reg = mse(expert_true, yb_reg)
-                loss = loss_cls + args.lambda_reg * loss_reg
-
+                loss = args.lambda_reg * loss_reg
                 loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), args.clip)
                 opt.step()
 
-                running += loss.item() * xb.size(0)
-                seen += xb.size(0)
+                running_reg += loss_reg.item() * xb.size(0)
+                seen_reg += xb.size(0)
 
-            tr_loss = running / max(1, seen)
-            va_cls_loss, va_cls_acc, va_reg_rmse = evaluate(model, val_loader, device)
+            tr_cls_loss = running_cls / max(1, seen_cls)
+            tr_reg_loss = running_reg / max(1, seen_reg)
+            va_cls_loss, va_cls_acc = evaluate_trajectory_classification(model, val_cls_loader, device)
+            va_reg_rmse = evaluate_window_regression(model, val_reg_loader, device)
             joint_val = va_cls_loss + args.lambda_reg * (va_reg_rmse ** 2)
             sched.step(joint_val)
 
@@ -506,7 +627,7 @@ def main(args):
 
             lr_now = opt.param_groups[0]["lr"]
             print(
-                f"Epoch {epoch:03d} | train_loss={tr_loss:.5f} | "
+                f"Epoch {epoch:03d} | train_cls_loss={tr_cls_loss:.5f} | train_reg_loss={tr_reg_loss:.5f} | "
                 f"val_cls_acc={100.0 * va_cls_acc:.2f}% | val_reg_rmse={va_reg_rmse:.5f} | lr={lr_now:.2e}"
             )
         trainTimer.toc()
@@ -514,7 +635,8 @@ def main(args):
     model.load_state_dict(ckpt["model"])
 
     testTimer = timer()
-    te_cls_loss, te_cls_acc, te_reg_rmse = evaluate(model, test_loader, device)
+    te_cls_loss, te_cls_acc = evaluate_trajectory_classification(model, test_cls_loader, device)
+    te_reg_rmse = evaluate_window_regression(model, test_reg_loader, device)
     testTimer.toc()
     print("\nFinal Test Metrics")
     print(f"Classification Loss: {te_cls_loss:.5f}")
@@ -526,7 +648,7 @@ def main(args):
     all_logits = []
     all_labels = []
     with torch.no_grad():
-        for xb, yb_cls, _ in test_loader:
+        for xb, yb_cls in test_cls_loader:
             xb = xb.to(device)
             yb_cls = yb_cls.to(device)
             logits, _, _ = model(xb)
@@ -551,9 +673,12 @@ def main(args):
         labels=test_lbl,
         norm_state=norm_state,
         lookback=args.lookback,
-        rollout_steps=args.rollout_steps,
+        split_idx=half_idx,
+        rollout_steps=test_traj_second.shape[1],
         device=device,
     )
+
+    true_rollout_targets = test_traj_second
 
     # print per class rollout counts
     for c in range(4):
@@ -569,7 +694,7 @@ def main(args):
         ax = fig.add_subplot(111, projection="3d")
 
         # plot true final states for trajectories classified into class c
-        true_pts = test_traj[idx_pred, -1, :3]
+        true_pts = true_rollout_targets[idx_pred, -1, :3]
         ax.scatter(true_pts[:, 0], true_pts[:, 1], true_pts[:, 2], s=3, alpha=0.2, c="black", label="Classified Subset (True)")
 
         # plot predicted final states in color
@@ -604,7 +729,7 @@ def main(args):
     plot_position_clouds(pred_rollouts, pred_classes, fig_path)
     # plot true classes for reference
     plot_position_clouds(
-        test_traj[:, args.lookback :, :],
+        true_rollout_targets,
         test_lbl,
         os.path.join(args.save_dir, f"{plot_tag}_true_position_point_cloud.png"),
     )
@@ -623,9 +748,9 @@ def main(args):
             )
             continue
 
-        pos_true = test_traj[idx_pred, -1, :3]
+        pos_true = true_rollout_targets[idx_pred, -1, :3]
         pos_pred = pred_rollouts[idx_pred, -1, :3]
-        vel_true = test_traj[idx_pred, -1, 3:]
+        vel_true = true_rollout_targets[idx_pred, -1, 3:]
         vel_pred = pred_rollouts[idx_pred, -1, 3:]
 
         try:
