@@ -715,6 +715,7 @@ def main(args):
     np.savez(
         cloud_path,
         pred_rollouts=pred_rollouts,
+        true_rollouts=true_rollout_targets,
         pred_classes=pred_classes,
         true_classes=true_classes,
         class0=class_clouds[0],
