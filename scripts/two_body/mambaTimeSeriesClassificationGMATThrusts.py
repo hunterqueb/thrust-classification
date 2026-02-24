@@ -611,7 +611,8 @@ def main():
         hankel_L=1,
         hankel_step=1,
         hankel_pool="mean",
-        return_pca=True
+        return_pca=True,
+        supress_print=True
         )
 
         # Infer input dim d from one batch
