@@ -30,6 +30,7 @@ parser.add_argument('--shap',dest="run_shap",action='store_true', help='run shap
 parser.add_argument("--train_ratio", type=float, default=0.7, help="Ratio of data to use for training")
 parser.add_argument("--pca", type=int, default=None, help="If set to an integer, use PCA to reduce the input features to this number of components.")
 parser.add_argument('--mlp', dest="useMLP", action='store_true', help='Use a simple MLP on Hankel+PCA pooled data for comparison.')
+parser.add_argument("--transformer", dest="use_transformer", action="store_true", help="Enable Transformer model comparison (disabled by default)")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
@@ -44,6 +45,7 @@ parser.set_defaults(use_classic=True)
 parser.set_defaults(use_nearestNeighbor=False)
 parser.set_defaults(saveNets=False)
 parser.set_defaults(run_shap=False)
+parser.set_defaults(use_transformer=False)
 
 args = parser.parse_args()
 use_lstm = args.use_lstm
@@ -69,6 +71,8 @@ saveNets = args.saveNets
 velNoise = args.velNoise
 run_shap = args.run_shap
 train_ratio = args.train_ratio
+use_transformer = args.use_transformer
+
 if args.pca is not None and args.pca > 0:
     pca_enabled = True
     pca_n_components = args.pca
@@ -90,6 +94,36 @@ from qutils.ml.classifer import trainClassifier, LSTMClassifier, validateMultiCl
 from qutils.ml.mamba import Mamba, MambaConfig, MambaClassifier
 from qutils.ml.superweight import printoutMaxLayerWeight,getSuperWeight,plotSuperWeight, findMambaSuperActivation,plotSuperActivation
 from qutils.ml.shap import run_shap_analysis
+
+#tranformer classifier for time series data
+class TransformerClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes):
+        super(TransformerClassifier, self).__init__()
+        
+        self.d_model = hidden_size  # Output of transformer & input to fc
+        self.embedding = nn.Linear(input_size, self.d_model)  # Project input to match d_model
+
+        self.transformer = nn.Transformer(
+            d_model=self.d_model,
+            nhead=8,  # Make sure d_model % nhead == 0
+            num_encoder_layers=num_layers,
+            num_decoder_layers=num_layers,
+            dim_feedforward=64,  # Internal feedforward layer size inside Transformer
+            batch_first=True
+        )
+        
+        self.fc = nn.Linear(self.d_model, num_classes)  # Final classification layer
+
+    def forward(self, x):
+        """
+        x: [batch_size, seq_length, input_size]
+        """
+        x = self.embedding(x)         # [batch_size, seq_length, d_model]
+        out = self.transformer(x, x)  # [batch_size, seq_length, d_model]
+        last_output = out[:, -1, :]   # [batch_size, d_model]
+        logits = self.fc(last_output) # [batch_size, num_classes]
+        return logits
+
 
 class MLP(nn.Module):
     def __init__(self, d_in, n_classes=4, width=256, depth=2, p_drop=0.1):
@@ -613,7 +647,52 @@ def main():
                             index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
                             columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
 
+    if use_transformer:
+        print("\nEntering Transformer Training Loop")
+        model_transformer = TransformerClassifier(input_size, hidden_size, num_layers, num_classes).to(device).double()
+        optimizer_transformer = torch.optim.Adam(model_transformer.parameters(), lr=learning_rate)
+        scheduler_transformer = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer_transformer,
+            mode='min',             # or 'max' for accuracy
+            factor=0.5,             # shrink LR by 50%
+            patience=schedulerPatience
+        )
+        trainClassifier(model_transformer,optimizer_transformer,scheduler_transformer,[train_loader,test_loader,val_loader],criterion,num_epochs,device,classLabels=classlabels)
+        printModelParmSize(model_transformer)
 
+        print("\nTransformer Validation")
+        transformerInference = timer()
+        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
+        transformerInference.tocStr("Transformer Inference Time")
+
+        model_transformer.eval()
+        all_y, all_p = [], []
+        with torch.no_grad():
+            for xb, yb in _eval_loader:
+                logits = model_transformer(xb.to(device))
+                pred = logits.argmax(dim=1).cpu().numpy()
+                all_p.append(pred)
+                all_y.append(yb.view(-1).cpu().numpy())
+        all_p = np.concatenate(all_p); all_y = np.concatenate(all_y)
+
+        print("\nClassification Report:")
+        print(
+            classification_report(
+                all_y,
+                all_p,
+                labels=list(range(num_classes)),
+                digits=4,
+                zero_division=0,
+            )
+        )
+                # Confusion-matrix -----------------------------------------------------
+        cm = confusion_matrix(all_y, all_p, labels=list(range(num_classes)))
+        print("\nConfusion Matrix (rows = true, cols = predicted):")
+        print(pd.DataFrame(cm,
+                            index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
+                            columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
+        
 
 
 # # example onnx export
