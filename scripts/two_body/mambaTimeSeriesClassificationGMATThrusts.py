@@ -539,33 +539,6 @@ def main():
         validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         transformerInference.tocStr("Transformer Inference Time")
 
-        model_transformer.eval()
-        all_y, all_p = [], []
-        with torch.no_grad():
-            for xb, yb in _eval_loader:
-                logits = model_transformer(xb.to(device))
-                pred = logits.argmax(dim=1).cpu().numpy()
-                all_p.append(pred)
-                all_y.append(yb.view(-1).cpu().numpy())
-        all_p = np.concatenate(all_p); all_y = np.concatenate(all_y)
-
-        print("\nClassification Report:")
-        print(
-            classification_report(
-                all_y,
-                all_p,
-                labels=list(range(num_classes)),
-                digits=4,
-                zero_division=0,
-            )
-        )
-                # Confusion-matrix -----------------------------------------------------
-        cm = confusion_matrix(all_y, all_p, labels=list(range(num_classes)))
-        print("\nConfusion Matrix (rows = true, cols = predicted):")
-        print(pd.DataFrame(cm,
-                            index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
-                            columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
-
     if useOE:
         feat_names = ['a','ecc','inc','RAAN','argp','nu']
     else:
@@ -623,7 +596,6 @@ def main():
 
     # needs to be last, PCA is not used for the other models and we want to keep the same data for all non-MLP models if PCA is enabled, so we do it after training and evaluating those models
     if useMLP is True:
-        print("\nEntering MLP Training Loop")
         train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label, pca_state = prepareThrustClassificationDatasets(
         yaml_config,
         dataConfig,
