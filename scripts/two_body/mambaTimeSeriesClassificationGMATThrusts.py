@@ -249,18 +249,18 @@ if useHybrid:
     strAdd = strAdd + "Hybrid_"
 # if use_classic:
 #     strAdd = strAdd + "DT_"
-if use_nearestNeighbor:
-    strAdd = strAdd + "1-NN_"
+# if use_nearestNeighbor:
+#     strAdd = strAdd + "1-NN_"
 if train_ratio != 0.7:
     strAdd = strAdd + f"Train_{int(4*train_ratio*numRandSys)}_"
 if testSet != orbitType:
     strAdd = strAdd + "Test_" + testSet + "_"
 if velNoise != 1e-3:
     strAdd = strAdd + f"VelNoise{velNoise}_"
-if pca_enabled:
-    strAdd = strAdd + f"PCA{pca_n_components}_"
-if useMLP:
-    strAdd = strAdd + "MLP_"
+# if pca_enabled:
+#     strAdd = strAdd + f"PCA{pca_n_components}_"
+# if useMLP:
+#     strAdd = strAdd + "MLP_"
 
 # remove trailing _
 if strAdd.endswith("_"):
