@@ -520,6 +520,52 @@ def main():
     validateMultiClassClassifier(model_mamba, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
     mambaInference.tocStr("Mamba Inference Time")
 
+    if use_transformer:
+        print("\nEntering Transformer Training Loop")
+        model_transformer = TransformerClassifier(input_size, hidden_size, num_layers, num_classes).to(device).double()
+        optimizer_transformer = torch.optim.Adam(model_transformer.parameters(), lr=learning_rate)
+        scheduler_transformer = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer_transformer,
+            mode='min',             # or 'max' for accuracy
+            factor=0.5,             # shrink LR by 50%
+            patience=schedulerPatience
+        )
+        trainClassifier(model_transformer,optimizer_transformer,scheduler_transformer,[train_loader,test_loader,val_loader],criterion,num_epochs,device,classLabels=classlabels)
+        printModelParmSize(model_transformer)
+
+        print("\nTransformer Validation")
+        transformerInference = timer()
+        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
+        transformerInference.tocStr("Transformer Inference Time")
+
+        model_transformer.eval()
+        all_y, all_p = [], []
+        with torch.no_grad():
+            for xb, yb in _eval_loader:
+                logits = model_transformer(xb.to(device))
+                pred = logits.argmax(dim=1).cpu().numpy()
+                all_p.append(pred)
+                all_y.append(yb.view(-1).cpu().numpy())
+        all_p = np.concatenate(all_p); all_y = np.concatenate(all_y)
+
+        print("\nClassification Report:")
+        print(
+            classification_report(
+                all_y,
+                all_p,
+                labels=list(range(num_classes)),
+                digits=4,
+                zero_division=0,
+            )
+        )
+                # Confusion-matrix -----------------------------------------------------
+        cm = confusion_matrix(all_y, all_p, labels=list(range(num_classes)))
+        print("\nConfusion Matrix (rows = true, cols = predicted):")
+        print(pd.DataFrame(cm,
+                            index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
+                            columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
+
     if useOE:
         feat_names = ['a','ecc','inc','RAAN','argp','nu']
     else:
@@ -574,6 +620,8 @@ def main():
         plotSuperActivation(magnitude, index,printOutValues=True,mambaLayerAttributes = ["in_proj","conv1d","dt_proj"])
         plt.title("Mamba Classifier Super Activations")
 
+
+    # needs to be last, PCA is not used for the other models and we want to keep the same data for all non-MLP models if PCA is enabled, so we do it after training and evaluating those models
     if useMLP is True:
         print("\nEntering MLP Training Loop")
         train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label, pca_state = prepareThrustClassificationDatasets(
@@ -647,51 +695,6 @@ def main():
                             index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
                             columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
 
-    if use_transformer:
-        print("\nEntering Transformer Training Loop")
-        model_transformer = TransformerClassifier(input_size, hidden_size, num_layers, num_classes).to(device).double()
-        optimizer_transformer = torch.optim.Adam(model_transformer.parameters(), lr=learning_rate)
-        scheduler_transformer = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer_transformer,
-            mode='min',             # or 'max' for accuracy
-            factor=0.5,             # shrink LR by 50%
-            patience=schedulerPatience
-        )
-        trainClassifier(model_transformer,optimizer_transformer,scheduler_transformer,[train_loader,test_loader,val_loader],criterion,num_epochs,device,classLabels=classlabels)
-        printModelParmSize(model_transformer)
-
-        print("\nTransformer Validation")
-        transformerInference = timer()
-        _eval_loader = test_loader if (testSet != orbitType) else val_loader
-        validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
-        transformerInference.tocStr("Transformer Inference Time")
-
-        model_transformer.eval()
-        all_y, all_p = [], []
-        with torch.no_grad():
-            for xb, yb in _eval_loader:
-                logits = model_transformer(xb.to(device))
-                pred = logits.argmax(dim=1).cpu().numpy()
-                all_p.append(pred)
-                all_y.append(yb.view(-1).cpu().numpy())
-        all_p = np.concatenate(all_p); all_y = np.concatenate(all_y)
-
-        print("\nClassification Report:")
-        print(
-            classification_report(
-                all_y,
-                all_p,
-                labels=list(range(num_classes)),
-                digits=4,
-                zero_division=0,
-            )
-        )
-                # Confusion-matrix -----------------------------------------------------
-        cm = confusion_matrix(all_y, all_p, labels=list(range(num_classes)))
-        print("\nConfusion Matrix (rows = true, cols = predicted):")
-        print(pd.DataFrame(cm,
-                            index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
-                            columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
         
 
 
