@@ -26,7 +26,21 @@ Model normalization:
 Usage: from /gmat/data/classification
 python generateLatexTable.py --vleo parsed_data/vleo/_group/csv/summary_vleo-low.csv --leo parsed_data/leo/_group/csv/summary_leo-low.csv --out-prefix class_sum_macro_low
 python generateLatexTable.py --vleo parsed_data/vleo/_group/csv/summary_vleo-high.csv --leo parsed_data/leo/_group/csv/summary_leo-high.csv --out-prefix class_sum_macro_high
+python generateLatexTable.py --vleo parsed_data/vleo/_group/csv/summary_group.csv --leo parsed_data/leo/_group/csv/summary_group.csv --out-prefix class_vleo_leo
 
+python generateLatexTable.py \
+  --csv parsed_data/vleo/_group/csv/summary_group.csv \
+  --train-label VLEO \
+  --csv parsed_data/geo/_group/csv/summary_group.csv \
+  --train-label GEO \
+  --out-prefix class_vleo_geo
+
+python generateLatexTable.py \
+  --csv parsed_data/vleo/_group/csv/summary_group.csv \
+  --train-label VLEO \
+  --out-prefix class_vleo
+
+Generated using ChatGPT
 """
 
 from __future__ import annotations
@@ -40,8 +54,23 @@ import pandas as pd
 
 # ------------------------- Utilities -------------------------
 
+
 TIME_SET = (10, 30, 100)
-MODEL_ORDER = ("DT", "LSTM", "S4")
+
+
+def get_model_order(df: pd.DataFrame) -> List[str]:
+    """
+    Determine model order from available data.
+    Order by descending mean macro_f1; break ties alphabetically for stability.
+    """
+    if df.empty:
+        return []
+    score = (
+        df.groupby("model_display", as_index=True)["macro_f1"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+    return sorted(score.index.tolist(), key=lambda m: (-score[m], m))
 
 
 def extract_minutes(stem: str) -> Optional[int]:
@@ -135,31 +164,24 @@ def build_bold_masks(best_pivot: pd.DataFrame) -> Dict[Tuple[str, int, str], Dic
     mark which cells should be bold.
     """
     masks: Dict[Tuple[str, int, str], Dict[str, bool]] = {}
-    # Defensive: determine available (train, time) pairs dynamically
-    available_pairs = set(best_pivot.index.droplevel("model_display").unique())
-    for train in ("VLEO", "LEO"):
-        for t in TIME_SET:
-            if (train, t) not in available_pairs:
-                continue
-            block = best_pivot.xs((train, t), level=("train_set", "time_min"), drop_level=False)
-            max_R = block["macro_recall"].max(skipna=True)
-            max_P = block["macro_precision"].max(skipna=True)
-            max_F = block["macro_f1"].max(skipna=True)
-            for (_, _, model) in block.index:
-                row = block.loc[(train, t, model)]
-                r, p, f = row["macro_recall"], row["macro_precision"], row["macro_f1"]
-                masks[(train, t, model)] = {
-                    "R": (pd.notna(r) and abs(r - max_R) < 1e-12),
-                    "P": (pd.notna(p) and abs(p - max_P) < 1e-12),
-                    "F": (pd.notna(f) and abs(f - max_F) < 1e-12),
-                }
+    for (_, _), block in best_pivot.groupby(level=["train_set", "time_min"], sort=False):
+        max_R = block["macro_recall"].max(skipna=True)
+        max_P = block["macro_precision"].max(skipna=True)
+        max_F = block["macro_f1"].max(skipna=True)
+        for (train, t, model), row in block.iterrows():
+            r, p, f = row["macro_recall"], row["macro_precision"], row["macro_f1"]
+            masks[(train, t, model)] = {
+                "R": (pd.notna(r) and abs(r - max_R) < 1e-12),
+                "P": (pd.notna(p) and abs(p - max_P) < 1e-12),
+                "F": (pd.notna(f) and abs(f - max_F) < 1e-12),
+            }
     return masks
 
 
-def make_latex_table(best: pd.DataFrame, caption: str, label: str) -> str:
+def make_latex_table(best: pd.DataFrame, caption: str, label: str, train_sets: List[str]) -> str:
     """
     Horizontal format:
-      VLEO block (10/30/100 × R,P,F1) | LEO block (10/30/100 × R,P,F1)
+      One block per train set (10/30/100 × R,P,F1).
     Bold = best per train_set × time_min × metric.
     """
     if best.empty:
@@ -167,36 +189,51 @@ def make_latex_table(best: pd.DataFrame, caption: str, label: str) -> str:
 
     best_pivot = best.set_index(["train_set", "time_min", "model_display"]).sort_index()
     masks = build_bold_masks(best_pivot)
+    model_order = get_model_order(best)
 
     rows: List[str] = []
-    for model in MODEL_ORDER:
+    for model in model_order:
         cells: List[str] = [f"\\textbf{{{model}}}"]
-        # VLEO side
-        for t in TIME_SET:
-            key = ("VLEO", t, model)
-            if key in best_pivot.index:
-                r = best_pivot.loc[key, "macro_recall"]
-                p = best_pivot.loc[key, "macro_precision"]
-                f = best_pivot.loc[key, "macro_f1"]
-                m = masks.get(key, {"R": False, "P": False, "F": False})
-                cells += [format_cell(r, m["R"]), format_cell(p, m["P"]), format_cell(f, m["F"])]
-            else:
-                cells += ["---", "---", "---"]
-        cells.append(" ")
-        # LEO side
-        for t in TIME_SET:
-            key = ("LEO", t, model)
-            if key in best_pivot.index:
-                r = best_pivot.loc[key, "macro_recall"]
-                p = best_pivot.loc[key, "macro_precision"]
-                f = best_pivot.loc[key, "macro_f1"]
-                m = masks.get(key, {"R": False, "P": False, "F": False})
-                cells += [format_cell(r, m["R"]), format_cell(p, m["P"]), format_cell(f, m["F"])]
-            else:
-                cells += ["---", "---", "---"]
+        for train in train_sets:
+            for t in TIME_SET:
+                key = (train, t, model)
+                if key in best_pivot.index:
+                    r = best_pivot.loc[key, "macro_recall"]
+                    p = best_pivot.loc[key, "macro_precision"]
+                    f = best_pivot.loc[key, "macro_f1"]
+                    m = masks.get(key, {"R": False, "P": False, "F": False})
+                    cells += [format_cell(r, m["R"]), format_cell(p, m["P"]), format_cell(f, m["F"])]
+                else:
+                    cells += ["---", "---", "---"]
         rows.append(" & ".join(cells) + " \\\\")
 
     body = "\n".join(rows)
+
+    block_colspec = " ".join(["ccc ccc ccc"] * len(train_sets))
+    colspec = f"l {block_colspec}".strip()
+
+    top_headers: List[str] = []
+    top_cmidrules: List[str] = []
+    mid_headers: List[str] = []
+    metric_headers: List[str] = ["\\textbf{Model}"]
+    metric_cmidrules: List[str] = []
+
+    for i, train in enumerate(train_sets):
+        start = 2 + i * 9
+        end = start + 8
+        top_headers.append(f"\\multicolumn{{9}}{{c}}{{\\textbf{{{train} Train}}}}")
+        top_cmidrules.append(f"\\cmidrule(lr){{{start}-{end}}}")
+
+        for j, t in enumerate(TIME_SET):
+            t_start = start + j * 3
+            t_end = t_start + 2
+            mid_headers.append(f"\\multicolumn{{3}}{{c}}{{\\textbf{{{t} Minute}}}}")
+            metric_cmidrules.append(f"\\cmidrule(lr){{{t_start}-{t_end}}}")
+            metric_headers += ["\\textbf{R}", "\\textbf{P}", "\\textbf{F1}"]
+
+    top_row = " & " + " & ".join(top_headers) + r" \\"
+    mid_row = " & " + " & ".join(mid_headers) + r" \\"
+    metric_row = " & ".join(metric_headers) + r" \\"
 
     latex = r"""
 \begin{table}[t]
@@ -205,17 +242,13 @@ def make_latex_table(best: pd.DataFrame, caption: str, label: str) -> str:
 \renewcommand{\arraystretch}{1.1}
 
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lccc ccc ccc l ccc ccc ccc}
+\begin{tabular}{""" + colspec + r"""}
 \toprule
-\multicolumn{10}{c}{\textbf{VLEO Train}} &
-\multicolumn{10}{c}{\textbf{LEO Train}} \\
-\cmidrule(lr){1-10}\cmidrule(lr){11-20}
- & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} &
- & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}%
-\cmidrule(lr){12-14}\cmidrule(lr){15-17}\cmidrule(lr){18-20}
-\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} &
- & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+""" + top_row + """
+""" + "".join(top_cmidrules) + """
+""" + mid_row + """
+""" + "".join(metric_cmidrules) + """
+""" + metric_row + r"""
 \midrule
 """ + body + r"""
 \bottomrule
@@ -231,8 +264,14 @@ def make_latex_table(best: pd.DataFrame, caption: str, label: str) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--vleo", required=True, type=Path, help="Path to summary_vleo-high.csv")
-    ap.add_argument("--leo",  required=True, type=Path, help="Path to summary_leo-high.csv")
+    ap.add_argument("--csv", action="append", type=Path,
+                    help="Path to a train-set summary CSV. Repeat to include multiple train sets.")
+    ap.add_argument("--train-label", action="append",
+                    help="Label for each --csv in the same order (e.g., VLEO, LEO, HEO).")
+    ap.add_argument("--vleo", type=Path, help="Legacy: Path to VLEO summary CSV")
+    ap.add_argument("--leo",  type=Path, help="Legacy: Path to LEO summary CSV")
+    ap.add_argument("--train1", default="VLEO", help="Legacy label for --vleo")
+    ap.add_argument("--train2", default="LEO", help="Legacy label for --leo")
     ap.add_argument("--out-prefix", required=True, type=Path, help="Output prefix for .tex files")
     ap.add_argument("--select-by",
                     choices=["macro_f1", "macro_precision", "macro_recall"],
@@ -240,45 +279,64 @@ def main():
                     help="Selection criterion for the best run per (train,time,model). Default: macro_f1")
     args = ap.parse_args()
 
-    # Load CSVs
-    vleo_raw = pd.read_csv(args.vleo)
-    leo_raw  = pd.read_csv(args.leo)
+    # Resolve train-set inputs
+    train_paths: List[Path]
+    train_labels: List[str]
+    if args.csv:
+        train_paths = args.csv
+        if args.train_label:
+            if len(args.train_label) != len(train_paths):
+                raise ValueError("When using --csv, provide exactly one --train-label per CSV.")
+            train_labels = args.train_label
+        else:
+            train_labels = [f"TRAIN{i + 1}" for i in range(len(train_paths))]
+    else:
+        if not (args.vleo and args.leo):
+            raise ValueError("Provide either one-or-more --csv arguments, or both --vleo and --leo.")
+        train_paths = [args.vleo, args.leo]
+        train_labels = [args.train1, args.train2]
 
-    # Prepare frames (adds time_min, model_display, is_oe, macro_* standardized)
-    vleo_all = prepare_frame(vleo_raw, "VLEO")
-    leo_all  = prepare_frame(leo_raw,  "LEO")
+    # Load and prepare all train sets
+    prepared_frames: List[pd.DataFrame] = []
+    for path, label in zip(train_paths, train_labels):
+        prepared_frames.append(prepare_frame(pd.read_csv(path), label))
 
     # Split into OE vs Cartesian by log name token
-    vleo_oe   = vleo_all[vleo_all["is_oe"] == True]
-    vleo_cart = vleo_all[vleo_all["is_oe"] == False]
-    leo_oe    = leo_all[leo_all["is_oe"] == True]
-    leo_cart  = leo_all[leo_all["is_oe"] == False]
+    oe_frames = [df[df["is_oe"] == True] for df in prepared_frames]
+    cart_frames = [df[df["is_oe"] == False] for df in prepared_frames]
 
+    train_set_text = (
+        train_labels[0]
+        if len(train_labels) == 1
+        else ", ".join(train_labels[:-1]) + f" and {train_labels[-1]}"
+    )
 
     # Build Cartesian table
-    df_cart = pd.concat([vleo_cart, leo_cart], ignore_index=True)
+    df_cart = pd.concat(cart_frames, ignore_index=True)
     best_cart = select_best(df_cart, criterion=args.select_by) if not df_cart.empty else df_cart
     if best_cart.empty:
         cart_tex = "% No Cartesian rows found after filtering; check your CSVs."
     else:
         cart_tex = make_latex_table(
             best_cart,
-            caption=("Summary of Cartesian macro Precision (P), Recall (R), and F1 for VLEO and LEO "
+            caption=(f"Summary of Cartesian macro Precision (P), Recall (R), and F1 for {train_set_text} "
                      "train sets at 10/30/100 minutes. Bold = best per train/time/metric."),
             label=f"tab:{args.out_prefix}_cart",
+            train_sets=train_labels,
         )
 
     # Build OE table
-    df_oe = pd.concat([vleo_oe, leo_oe], ignore_index=True)
+    df_oe = pd.concat(oe_frames, ignore_index=True)
     best_oe = select_best(df_oe, criterion=args.select_by) if not df_oe.empty else df_oe
     if best_oe.empty:
         oe_tex = "% No OE rows found after filtering; check your CSVs."
     else:
         oe_tex = make_latex_table(
             best_oe,
-            caption=("Summary of OE macro Precision (P), Recall (R), and F1 for VLEO and LEO "
+            caption=(f"Summary of OE macro Precision (P), Recall (R), and F1 for {train_set_text} "
                      "train sets at 10/30/100 minutes. Bold = best per train/time/metric."),
             label=f"tab:{args.out_prefix}_oe",
+            train_sets=train_labels,
         )
 
     # Write outputs

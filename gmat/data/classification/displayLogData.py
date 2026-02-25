@@ -12,6 +12,8 @@ Usage:
 python displayLogData.py . --force
 python displayLogData.py . --group-dir vleo/ --group-name vleo-low
 python displayLogData.py . --group-dir vleo/ --group-name vleo-low --emit-per-log
+
+Generated using ChatGPT
 """
 
 from pathlib import Path
@@ -317,6 +319,12 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
     class_dfs: List[pd.DataFrame] = []
 
     for model, blk in iter_models(text):
+        # Some logs can contain duplicate "Entering <Model> Training Loop" markers.
+        # The first block may contain only setup lines and no validation metrics.
+        if not RE_VAL_ACC.search(blk):
+            print(f"{path} - skipping empty metrics block for {model}")
+            continue
+
         summ, cls_df = summarize(model, blk)
         # annotate for grouping
         summ.log_stem = stem
