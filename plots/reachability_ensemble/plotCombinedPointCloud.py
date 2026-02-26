@@ -95,7 +95,8 @@ def main(args):
     print(f"Class clouds shapes: {[cloud.shape for cloud in class_clouds]}")
 
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10, 8))
-    colors = ["red", "blue", "green", "orange"]
+    colors = ["red", "blue", "orange", "green"]
+    # colors = ["C3", "C0", "C1", "C2"]
     for i in range(4):
         cloud = true_rollouts[true_classes == i]
         if cloud.shape[0] > 0:
@@ -115,12 +116,13 @@ def main(args):
         if cloud.shape[0] > 0:
             points = cloud[:, -1, :3]  # (N, 3)
             faces, volume = alpha_shape_faces_and_volume(points)
-            ax.add_collection3d(Poly3DCollection(faces, alpha=0.3, facecolor=colors[i], edgecolor='k', label=f"{CLASS_LABELS[i]} (Volume: {volume:.2f} km^3)"))
+            # ax.add_collection3d(Poly3DCollection(faces, alpha=0.3, facecolor=colors[i], edgecolor='k', label=f"{CLASS_LABELS[i]} (Volume: {volume:.2f} km^3)"))
+            ax.add_collection3d(Poly3DCollection(faces, alpha=0.3, facecolor=colors[i], edgecolor='k', label=f"{CLASS_LABELS[i]}"))
 
     ax.set_xlabel("x (km)")
     ax.set_ylabel("y (km)") 
     ax.set_zlabel("z (km)")
-    ax.set_title("Alpha Shape of True Reachability Point Cloud")
+    # ax.set_title("Alpha Shape of True Reachability Point Cloud")
     ax.legend()
     ax.grid()
 
