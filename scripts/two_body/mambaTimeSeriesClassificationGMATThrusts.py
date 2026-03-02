@@ -484,6 +484,50 @@ def main():
             print(f"Total memory (MB): {size_bytes / (1024 ** 2):.4f}")
             print("==========================================================================================")
 
+        def validate_minirocket(clf, val_loader, num_classes, classlabels=None):
+            """Evaluate a MiniRocket (RocketClassifier) on a PyTorch DataLoader."""
+            X_val_list, y_val_list = [], []
+            for seq, lab in val_loader:
+                X_val_list.append(seq.cpu().numpy())
+                y_val_list.append(lab.cpu().numpy())
+
+            X_val_np = np.concatenate(X_val_list, axis=0)
+            y_true = np.concatenate(y_val_list)
+
+            # [N,T,C] -> [N,C,T] for sktime
+            X_val_np = np.transpose(X_val_np, (0, 2, 1))
+
+            y_pred = clf.predict(X_val_np)
+
+            correct = (y_pred == y_true).sum()
+            accuracy = 100.0 * correct / len(y_true)
+            print(f"Validation Loss: NaN, Validation Accuracy: {accuracy:.2f}%\n")
+
+            class_corr = np.zeros(num_classes, dtype=int)
+            class_tot = np.zeros(num_classes, dtype=int)
+            for yt, yp in zip(y_true, y_pred):
+                class_tot[yt] += 1
+                if yt == yp:
+                    class_corr[yt] += 1
+
+            print("Per-Class Validation Accuracy:")
+            for i in range(num_classes):
+                label = classlabels[i] if classlabels else f"Class {i}"
+                if class_tot[i]:
+                    print(f"  {label}: {100.0 * class_corr[i] / class_tot[i]:.2f}% ({class_corr[i]}/{class_tot[i]})")
+                else:
+                    print(f"  {label}: No samples")
+
+            print("\nClassification Report:")
+            print(classification_report(y_true, y_pred, labels=list(range(num_classes)),
+                                        target_names=(classlabels if classlabels else None),
+                                        digits=4, zero_division=0))
+            cm = confusion_matrix(y_true, y_pred, labels=list(range(num_classes)))
+            print("\nConfusion Matrix (rows = true, cols = predicted):")
+            print(pd.DataFrame(cm,
+                                index=[f"T_{cls}" for cls in (classlabels if classlabels else range(num_classes))],
+                                columns=[f"P_{cls}" for cls in (classlabels if classlabels else range(num_classes))]))
+
         from sktime.classification.kernel_based import RocketClassifier
 
         print("\nEntering MiniRocket Training Loop")
@@ -495,18 +539,12 @@ def main():
         clf_mr.fit(train_data_MR, train_label)
         mrTimer.toc()
         printMiniROCKETSize(clf_mr)
+
         print("\nMiniRocket Validation")
         mrInference = timer()
-        _eval_data_MR = np.transpose(test_data if testSet != orbitType else val_data, (0, 2, 1))
-        _eval_label_MR = test_label if testSet != orbitType else val_label
-        y_pred_mr = clf_mr.predict(_eval_data_MR)
+        _eval_loader_MR = test_loader if testSet != orbitType else val_loader
+        validate_minirocket(clf_mr, _eval_loader_MR, num_classes, classlabels=classlabels)
         mrInference.tocStr("MiniRocket Inference Time")
-        print(classification_report(_eval_label_MR, y_pred_mr, target_names=classlabels, digits=4, zero_division=0))
-        cm_mr = confusion_matrix(_eval_label_MR, y_pred_mr)
-        print("Confusion Matrix (rows = true, cols = predicted):")
-        print(pd.DataFrame(cm_mr,
-                            index=[f"T_{cls}" for cls in classlabels],
-                            columns=[f"P_{cls}" for cls in classlabels]))
 
     if use_lstm:
         model_LSTM = LSTMClassifier(input_size, hidden_size, num_layers, num_classes,SA=True).to(device).double()
