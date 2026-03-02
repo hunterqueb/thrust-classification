@@ -31,6 +31,7 @@ parser.add_argument("--train_ratio", type=float, default=0.7, help="Ratio of dat
 parser.add_argument("--pca", type=int, default=None, help="If set to an integer, use PCA to reduce the input features to this number of components.")
 parser.add_argument('--mlp', dest="useMLP", action='store_true', help='Use a simple MLP on Hankel+PCA pooled data for comparison.')
 parser.add_argument("--transformer", dest="use_transformer", action="store_true", help="Enable Transformer model comparison (disabled by default)")
+parser.add_argument('--minirocket', dest="use_minirocket", action='store_true', help='Use MiniRocket classifier for comparison')
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
@@ -46,6 +47,7 @@ parser.set_defaults(use_nearestNeighbor=False)
 parser.set_defaults(saveNets=False)
 parser.set_defaults(run_shap=False)
 parser.set_defaults(use_transformer=False)
+parser.set_defaults(use_minirocket=False)
 
 args = parser.parse_args()
 use_lstm = args.use_lstm
@@ -72,6 +74,7 @@ velNoise = args.velNoise
 run_shap = args.run_shap
 train_ratio = args.train_ratio
 use_transformer = args.use_transformer
+use_minirocket = args.use_minirocket
 
 if args.pca is not None and args.pca > 0:
     pca_enabled = True
@@ -468,6 +471,42 @@ def main():
         else:
             validate_1NN(clf, val_loader, num_classes, classlabels=classlabels)
         dtwInference.tocStr("1-NN Inference Time")
+
+    if use_minirocket:
+        def printMiniROCKETSize(model):\
+            # reports number of kernels as number of parameters 
+            import pickle
+            size_bytes = len(pickle.dumps(model))
+            num_kernels = model.num_kernels_
+            print("\n==========================================================================================")
+            print(f"Total parameters: {num_kernels}")
+            print(f"Total memory (bytes): {size_bytes}")
+            print(f"Total memory (MB): {size_bytes / (1024 ** 2):.4f}")
+            print("==========================================================================================")
+
+        from sktime.classification.kernel_based import RocketClassifier
+
+        print("\nEntering MiniRocket Training Loop")
+        # [N,T,C] -> [N,C,T]
+        train_data_MR = np.transpose(train_data, (0, 2, 1))
+
+        clf_mr = RocketClassifier(num_kernels=10000, rocket_transform='minirocket', n_jobs=-1)
+        mrTimer = timer()
+        clf_mr.fit(train_data_MR, train_label)
+        mrTimer.toc()
+        printMiniROCKETSize(clf_mr)
+        print("\nMiniRocket Validation")
+        mrInference = timer()
+        _eval_data_MR = np.transpose(test_data if testSet != orbitType else val_data, (0, 2, 1))
+        _eval_label_MR = test_label if testSet != orbitType else val_label
+        y_pred_mr = clf_mr.predict(_eval_data_MR)
+        mrInference.tocStr("MiniRocket Inference Time")
+        print(classification_report(_eval_label_MR, y_pred_mr, target_names=classlabels, digits=4, zero_division=0))
+        cm_mr = confusion_matrix(_eval_label_MR, y_pred_mr)
+        print("Confusion Matrix (rows = true, cols = predicted):")
+        print(pd.DataFrame(cm_mr,
+                            index=[f"T_{cls}" for cls in classlabels],
+                            columns=[f"P_{cls}" for cls in classlabels]))
 
     if use_lstm:
         model_LSTM = LSTMClassifier(input_size, hidden_size, num_layers, num_classes,SA=True).to(device).double()
