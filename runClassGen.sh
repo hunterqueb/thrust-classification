@@ -7,7 +7,7 @@
 # run generateThrustClass.sh to generate the classification results without energy features
 ./generateThrustClass.sh
 # generate latex tables for results without energy features
-./generateLatexTablesColor.sh
+./generateLaTeXTablesColor.sh
 # remove classification logs to avoid issue with energy features logs but preserve latex table files
 ./removeClassLogs.sh
 # run generateThrustClass_energy.sh to generate the classification results with energy features
