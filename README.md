@@ -5,10 +5,6 @@ generate trajectories using GMAT-Thrust-Data repo
 # generating results
 
 latest script:
-./generateJournalThrustClass.sh
+./runClassGen.sh
 
-## parsing results
-```
-cd gmat/data/classification/
-python displayLogData.py . --group-dir {orbit}
-```
+This runs the training for all classification with and without energy as a feature, and generates the latex tables for direct input into overleaf doc. Post processing is still needed on tables. This is outlined in the overleaf doc.
