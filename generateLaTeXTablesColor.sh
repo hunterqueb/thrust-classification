@@ -36,5 +36,3 @@
       --csv parsed_data/leo/_group/csv/summary_group.csv --train-label LEO \
       --csv parsed_data/combined/leo-meo-geo/_group/csv/summary_group.csv  --train-label LEO-MEO-GEO \
       --out-prefix class_leo_combined --metrics rpf1 --oe-only
-
-cd ../../..
