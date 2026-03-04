@@ -153,5 +153,3 @@ cd gmat/data/classification
 python displayLogData.py . --group-dir leo/
 # combined leo, meo, geo out of distribution to VLEO
 python displayLogData.py . --group-dir combined/leo-meo-geo/
-
-cd ../../..
