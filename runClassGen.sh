@@ -14,3 +14,5 @@
 ./generateThrustClass_energy.sh
 # generate latex tables for results with energy features
 ./generateLaTeXTablesColor_energy.sh
+
+mv *.tex gmat/data/tables/
