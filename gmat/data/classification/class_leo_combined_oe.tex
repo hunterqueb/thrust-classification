@@ -1,0 +1,28 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc ccc ccc ccc ccc}
+\toprule
+ & \multicolumn{9}{c}{\textbf{LEO Train}} & \multicolumn{9}{c}{\textbf{LEO-MEO-GEO Train}} \\
+\cmidrule(lr){2-10}\cmidrule(lr){11-19}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}\cmidrule(lr){14-16}\cmidrule(lr){17-19}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{MiniRocket} & \cellcolor[HTML]{9DD153}\textbf{0.64} & \cellcolor[HTML]{98D154}\textbf{0.65} & \cellcolor[HTML]{A3D152}\textbf{0.63} & \cellcolor[HTML]{59CF64}\textbf{0.74} & \cellcolor[HTML]{56CF65}\textbf{0.74} & \cellcolor[HTML]{5DCF63}\textbf{0.73} & \cellcolor[HTML]{52CF66}\textbf{0.75} & \cellcolor[HTML]{52CF66}\textbf{0.75} & \cellcolor[HTML]{54CF65}\textbf{0.75} & \cellcolor[HTML]{FFD03D}\textbf{0.49} & \cellcolor[HTML]{FFA152}0.38 & \cellcolor[HTML]{FFB549}\textbf{0.43} & \cellcolor[HTML]{55CF65}\textbf{0.74} & \cellcolor[HTML]{53CF66}\textbf{0.75} & \cellcolor[HTML]{54CF65}\textbf{0.74} & \cellcolor[HTML]{54CF65}\textbf{0.75} & \cellcolor[HTML]{51CF66}\textbf{0.75} & \cellcolor[HTML]{57CF64}\textbf{0.74} \\
+\textbf{Transformer} & \cellcolor[HTML]{DCD344}0.55 & \cellcolor[HTML]{DDD343}0.55 & \cellcolor[HTML]{E1D342}0.54 & \cellcolor[HTML]{AED24F}0.62 & \cellcolor[HTML]{A6D151}0.63 & \cellcolor[HTML]{ABD250}0.62 & \cellcolor[HTML]{9DD153}0.64 & \cellcolor[HTML]{9FD153}0.64 & \cellcolor[HTML]{ACD250}0.62 & \cellcolor[HTML]{FFC144}0.45 & \cellcolor[HTML]{FFAD4D}\textbf{0.41} & \cellcolor[HTML]{FFA84F}0.39 & \cellcolor[HTML]{C3D24A}0.59 & \cellcolor[HTML]{C8D249}0.58 & \cellcolor[HTML]{C8D249}0.58 & \cellcolor[HTML]{90D156}0.66 & \cellcolor[HTML]{96D155}0.65 & \cellcolor[HTML]{94D155}0.65 \\
+\textbf{S4} & \cellcolor[HTML]{DDD344}0.55 & \cellcolor[HTML]{E2D342}0.54 & \cellcolor[HTML]{E0D343}0.54 & \cellcolor[HTML]{D0D347}0.57 & \cellcolor[HTML]{E1D342}0.54 & \cellcolor[HTML]{E6D341}0.54 & \cellcolor[HTML]{7ED05B}0.69 & \cellcolor[HTML]{7CD05B}0.69 & \cellcolor[HTML]{7ED05B}0.69 & \cellcolor[HTML]{FFBC46}0.44 & \cellcolor[HTML]{FFAB4E}0.40 & \cellcolor[HTML]{FF9359}0.34 & \cellcolor[HTML]{BBD24C}0.60 & \cellcolor[HTML]{C0D24A}0.59 & \cellcolor[HTML]{BFD24B}0.59 & \cellcolor[HTML]{7FD05B}0.68 & \cellcolor[HTML]{84D059}0.68 & \cellcolor[HTML]{83D05A}0.68 \\
+\textbf{Nearest Neighbor} & \cellcolor[HTML]{FFD03D}0.49 & \cellcolor[HTML]{FFCC3F}0.48 & \cellcolor[HTML]{FFCD3E}0.48 & \cellcolor[HTML]{FFCE3E}0.49 & \cellcolor[HTML]{FFD23C}0.49 & \cellcolor[HTML]{FFCC3F}0.48 & \cellcolor[HTML]{E1D343}0.54 & \cellcolor[HTML]{E5D341}0.54 & \cellcolor[HTML]{E4D342}0.54 & \cellcolor[HTML]{FFAC4D}0.41 & \cellcolor[HTML]{FFA451}0.39 & \cellcolor[HTML]{FFA550}0.39 & \cellcolor[HTML]{FFC940}0.47 & \cellcolor[HTML]{FFC940}0.47 & \cellcolor[HTML]{FFC841}0.47 & \cellcolor[HTML]{F4D43E}0.52 & \cellcolor[HTML]{F0D43F}0.52 & \cellcolor[HTML]{F3D43E}0.52 \\
+\textbf{DT} & \cellcolor[HTML]{FFC542}0.47 & \cellcolor[HTML]{FFCA3F}0.48 & \cellcolor[HTML]{FFBF45}0.45 & \cellcolor[HTML]{FFC144}0.46 & \cellcolor[HTML]{FFC343}0.46 & \cellcolor[HTML]{FFB748}0.43 & \cellcolor[HTML]{FFC940}0.47 & \cellcolor[HTML]{FFA451}0.39 & \cellcolor[HTML]{FFB34A}0.42 & \cellcolor[HTML]{FFC343}0.46 & \cellcolor[HTML]{FFA351}0.38 & \cellcolor[HTML]{FFB04B}0.41 & \cellcolor[HTML]{FFCE3E}0.49 & \cellcolor[HTML]{FFCC3E}0.48 & \cellcolor[HTML]{FFC144}0.45 & \cellcolor[HTML]{FFCC3F}0.48 & \cellcolor[HTML]{FFAF4C}0.41 & \cellcolor[HTML]{FFB748}0.43 \\
+\textbf{LSTM} & \cellcolor[HTML]{FFD03D}0.49 & \cellcolor[HTML]{FFA451}0.39 & \cellcolor[HTML]{FFAC4D}0.40 & \cellcolor[HTML]{FFCB3F}0.48 & \cellcolor[HTML]{FFBE45}0.45 & \cellcolor[HTML]{FFB14B}0.42 & \cellcolor[HTML]{FF9B55}0.36 & \cellcolor[HTML]{FF9657}0.35 & \cellcolor[HTML]{FF7E62}0.30 & \cellcolor[HTML]{FFA352}0.38 & \cellcolor[HTML]{FF845F}0.31 & \cellcolor[HTML]{FF8D5B}0.33 & \cellcolor[HTML]{FFBE45}0.45 & \cellcolor[HTML]{FFBD45}0.45 & \cellcolor[HTML]{FFBD46}0.44 & \cellcolor[HTML]{FFA252}0.38 & \cellcolor[HTML]{FF9D54}0.37 & \cellcolor[HTML]{FF875E}0.32 \\
+\textbf{MLP} & \cellcolor[HTML]{FF7766}0.28 & \cellcolor[HTML]{FFAE4C}0.41 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF9856}0.36 & \cellcolor[HTML]{FFAD4D}0.41 & \cellcolor[HTML]{FF7069}0.26 & \cellcolor[HTML]{FF9657}0.35 & \cellcolor[HTML]{FF8F5B}0.34 & \cellcolor[HTML]{FF7766}0.28 & \cellcolor[HTML]{FF895D}0.32 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF7367}0.27 & \cellcolor[HTML]{FFB748}0.43 & \cellcolor[HTML]{FFB04B}0.41 & \cellcolor[HTML]{FFB14B}0.42 & \cellcolor[HTML]{E9D340}0.53 & \cellcolor[HTML]{E9D340}0.53 & \cellcolor[HTML]{ECD340}0.53 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Summary of OE macro Precision (P), Recall (R), and F1 for LEO and LEO-MEO-GEO train sets at 10/30/100 minutes. Bold = best per train/time/metric. Cell color: red\,=\,low, green\,=\,high.}
+\label{tab:class_leo_combined_oe}
+\end{table}
