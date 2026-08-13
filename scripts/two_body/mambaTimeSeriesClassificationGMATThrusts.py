@@ -32,6 +32,11 @@ parser.add_argument("--pca", type=int, default=None, help="If set to an integer,
 parser.add_argument('--mlp', dest="useMLP", action='store_true', help='Use a simple MLP on Hankel+PCA pooled data for comparison.')
 parser.add_argument("--transformer", dest="use_transformer", action="store_true", help="Enable Transformer model comparison (disabled by default)")
 parser.add_argument('--minirocket', dest="use_minirocket", action='store_true', help='Use MiniRocket classifier for comparison')
+parser.add_argument('--xgboost', dest="use_xgboost", action='store_true', help='Use XGBoost classifier for comparison (same flattened features as LightGBM)')
+parser.add_argument('--catboost', dest="use_catboost", action='store_true', help='Use CatBoost classifier for comparison (same flattened features as LightGBM)')
+parser.add_argument('--rf', dest="use_random_forest", action='store_true', help='Use Random Forest classifier for comparison (same flattened features as LightGBM)')
+parser.add_argument('--extratrees', dest="use_extra_trees", action='store_true', help='Use Extra Trees classifier for comparison (same flattened features as LightGBM)')
+parser.add_argument('--cnn', dest="use_cnn", action='store_true', help='Use a 1D-CNN (InceptionTime-style) classifier for comparison')
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
@@ -48,6 +53,11 @@ parser.set_defaults(saveNets=False)
 parser.set_defaults(run_shap=False)
 parser.set_defaults(use_transformer=False)
 parser.set_defaults(use_minirocket=False)
+parser.set_defaults(use_xgboost=False)
+parser.set_defaults(use_catboost=False)
+parser.set_defaults(use_random_forest=False)
+parser.set_defaults(use_extra_trees=False)
+parser.set_defaults(use_cnn=False)
 
 args = parser.parse_args()
 use_lstm = args.use_lstm
@@ -75,6 +85,11 @@ run_shap = args.run_shap
 train_ratio = args.train_ratio
 use_transformer = args.use_transformer
 use_minirocket = args.use_minirocket
+use_xgboost = args.use_xgboost
+use_catboost = args.use_catboost
+use_random_forest = args.use_random_forest
+use_extra_trees = args.use_extra_trees
+use_cnn = args.use_cnn
 
 if args.pca is not None and args.pca > 0:
     pca_enabled = True
@@ -100,31 +115,124 @@ from qutils.ml.shap import run_shap_analysis
 
 #tranformer classifier for time series data
 class TransformerClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, num_classes):
-        super(TransformerClassifier, self).__init__()
-        
-        self.d_model = hidden_size  # Output of transformer & input to fc
-        self.embedding = nn.Linear(input_size, self.d_model)  # Project input to match d_model
+    """Encoder-only Transformer with a learnable CLS token + positional embedding.
 
-        self.transformer = nn.Transformer(
+    The previous implementation ran a full encoder-decoder nn.Transformer with x fed as both
+    src and tgt, which is not a standard classification setup. This is encoder-only with a
+    CLS-token pooling head, matching the LSTM/Mamba/CNN classifiers' interface.
+    """
+    def __init__(self, input_size, hidden_size, num_layers, num_classes, nhead=8, dim_feedforward=64, dropout=0.1, max_len=4096):
+        super(TransformerClassifier, self).__init__()
+
+        self.d_model = hidden_size  # Output of transformer & input to fc
+
+        # d_model must be divisible by nhead; fall back to the largest divisor <= 8 if not
+        if self.d_model % nhead != 0:
+            for cand in (8, 4, 2, 1):
+                if self.d_model % cand == 0:
+                    nhead = cand
+                    break
+
+        self.embedding = nn.Linear(input_size, self.d_model)  # Project input to match d_model
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        self.pos_embedding = nn.Parameter(torch.zeros(1, max_len + 1, self.d_model))
+
+        encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.d_model,
-            nhead=8,  # Make sure d_model % nhead == 0
-            num_encoder_layers=num_layers,
-            num_decoder_layers=num_layers,
-            dim_feedforward=64,  # Internal feedforward layer size inside Transformer
-            batch_first=True
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
         )
-        
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
         self.fc = nn.Linear(self.d_model, num_classes)  # Final classification layer
 
     def forward(self, x):
         """
         x: [batch_size, seq_length, input_size]
         """
-        x = self.embedding(x)         # [batch_size, seq_length, d_model]
-        out = self.transformer(x, x)  # [batch_size, seq_length, d_model]
-        last_output = out[:, -1, :]   # [batch_size, d_model]
-        logits = self.fc(last_output) # [batch_size, num_classes]
+        batch_size, seq_len, _ = x.shape
+        x = self.embedding(x)                                    # [batch_size, seq_length, d_model]
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)    # [batch_size, 1, d_model]
+        x = torch.cat([cls_tokens, x], dim=1)                     # [batch_size, seq_length+1, d_model]
+        x = x + self.pos_embedding[:, :seq_len + 1, :]
+        out = self.encoder(x)                                     # [batch_size, seq_length+1, d_model]
+        cls_out = out[:, 0, :]                                    # [batch_size, d_model]
+        logits = self.fc(cls_out)                                 # [batch_size, num_classes]
+        return logits
+
+
+class InceptionModule(nn.Module):
+    """One InceptionTime module: a 1x1 bottleneck feeding parallel odd-kernel convs plus a
+    max-pool branch, concatenated along channels. GroupNorm (not BatchNorm) so training is
+    robust to the size-1 trailing batch that an undivided dataset can produce."""
+    def __init__(self, in_channels, n_filters=32, kernel_sizes=(9, 19, 39), bottleneck_channels=32):
+        super().__init__()
+        self.use_bottleneck = in_channels > 1
+        bt_channels = bottleneck_channels if self.use_bottleneck else in_channels
+        if self.use_bottleneck:
+            self.bottleneck = nn.Conv1d(in_channels, bottleneck_channels, kernel_size=1, bias=False)
+
+        self.convs = nn.ModuleList([
+            nn.Conv1d(bt_channels, n_filters, kernel_size=k, padding=k // 2, bias=False)
+            for k in kernel_sizes
+        ])
+        self.maxpool = nn.MaxPool1d(kernel_size=3, stride=1, padding=1)
+        self.maxpool_conv = nn.Conv1d(in_channels, n_filters, kernel_size=1, bias=False)
+
+        out_channels = n_filters * (len(kernel_sizes) + 1)
+        self.norm = nn.GroupNorm(num_groups=8, num_channels=out_channels)
+        self.act = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        # x: [batch_size, channels, seq_length]
+        bt = self.bottleneck(x) if self.use_bottleneck else x
+        branches = [conv(bt) for conv in self.convs]
+        branches.append(self.maxpool_conv(self.maxpool(x)))
+        out = torch.cat(branches, dim=1)
+        return self.act(self.norm(out))
+
+
+class InceptionTimeClassifier(nn.Module):
+    """1D-CNN, non-SSM/non-Transformer deep baseline built from stacked InceptionTime modules
+    with residual connections every 3 modules, global average pooling, and a linear head."""
+    def __init__(self, input_size, num_classes, n_filters=32, kernel_sizes=(9, 19, 39), depth=6):
+        super().__init__()
+        out_channels = n_filters * (len(kernel_sizes) + 1)
+
+        self.inception_modules = nn.ModuleList()
+        self.shortcuts = nn.ModuleList()
+        in_ch = input_size
+        for d in range(depth):
+            self.inception_modules.append(InceptionModule(in_ch, n_filters=n_filters, kernel_sizes=kernel_sizes))
+            if d % 3 == 2:
+                shortcut_in = input_size if d == 2 else out_channels
+                self.shortcuts.append(nn.Sequential(
+                    nn.Conv1d(shortcut_in, out_channels, kernel_size=1, bias=False),
+                    nn.GroupNorm(num_groups=8, num_channels=out_channels),
+                ))
+            in_ch = out_channels
+
+        self.gap = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Linear(out_channels, num_classes)
+
+    def forward(self, x):
+        """
+        x: [batch_size, seq_length, input_size]
+        """
+        x = x.transpose(1, 2)  # [batch_size, channels, seq_length]
+        res_input = x
+        shortcut_idx = 0
+        for d, module in enumerate(self.inception_modules):
+            x = module(x)
+            if d % 3 == 2:
+                shortcut = self.shortcuts[shortcut_idx](res_input)
+                shortcut_idx += 1
+                x = torch.relu(x + shortcut)
+                res_input = x
+        x = self.gap(x).squeeze(-1)  # [batch_size, out_channels]
+        logits = self.fc(x)
         return logits
 
 
@@ -425,26 +533,87 @@ def main():
         else:
             validateMultiClassClassifier(model_hybrid,val_loader,criterion,num_classes,device,classlabels,printReport=True)
 
+    # shared flattened-feature setup for all GBDT / classic-ML bake-off classifiers
+    if use_classic or use_xgboost or use_catboost or use_random_forest or use_extra_trees:
+        X_train = train_data.reshape(train_data.shape[0], -1).astype(np.float32)    # (number of systems to train on, network features * length of time series)
+        y_train = train_label.reshape(-1).astype(np.int32)             # (number of systems to train on,)
+        _eval_loader_classic = test_loader if testSet != orbitType else val_loader
+
     if use_classic:
         from lightgbm import LGBMClassifier
         from qutils.ml.classic.classifier import printDTModelSize, validate_lightgbm
 
-        print("\nEntering Decision Trees Training Loop")
-        # flatten features
-        X_train = train_data.reshape(train_data.shape[0], -1).astype(np.float32)    # (number of systems to train on, network features * length of time series)    
-        y_train = train_label.reshape(-1).astype(np.int32)             # (number of systems to train on,)
-        classicModel = LGBMClassifier(objective="multiclass",num_classes=num_classes,n_estimators=30,max_depth=-1,learning_rate=0.05,subsample=0.8,colsample_bytree=0.8,verbosity=-1)   # or 'verbose' for older builds)       
+        print("\nEntering Decision Trees (LightGBM) Training Loop")
+        classicModel = LGBMClassifier(objective="multiclass",num_classes=num_classes,n_estimators=30,max_depth=-1,learning_rate=0.05,subsample=0.8,colsample_bytree=0.8,verbosity=-1)   # or 'verbose' for older builds)
         DTTimer = timer()
         classicModel.fit(X_train, y_train)
         DTTimer.toc()
         printDTModelSize(classicModel)
-        print("\nDecision Trees Validation")
+        print("\nDecision Trees (LightGBM) Validation")
         DTTimerInference = timer()
-        if testSet != orbitType:
-            validate_lightgbm(classicModel, test_loader, num_classes, classlabels=classlabels, print_report=True)
-        else:
-            validate_lightgbm(classicModel, val_loader, num_classes, classlabels=classlabels, print_report=True)
-        DTTimerInference.tocStr("Decision Trees Inference Time")
+        validate_lightgbm(classicModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
+        DTTimerInference.tocStr("Decision Trees (LightGBM) Inference Time")
+
+    if use_xgboost:
+        from xgboost import XGBClassifier
+        from qutils.ml.classic.classifier import printClassicModelSize, validate_classic_classifier
+
+        print("\nEntering XGBoost Training Loop")
+        xgbModel = XGBClassifier(objective="multi:softprob", num_class=num_classes, n_estimators=200, max_depth=6, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, eval_metric="mlogloss", n_jobs=-1)
+        xgbTimer = timer()
+        xgbModel.fit(X_train, y_train)
+        xgbTimer.toc()
+        printClassicModelSize(xgbModel)
+        print("\nXGBoost Validation")
+        xgbTimerInference = timer()
+        validate_classic_classifier(xgbModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
+        xgbTimerInference.tocStr("XGBoost Inference Time")
+
+    if use_catboost:
+        from catboost import CatBoostClassifier
+        from qutils.ml.classic.classifier import printClassicModelSize, validate_classic_classifier
+
+        print("\nEntering CatBoost Training Loop")
+        catboostModel = CatBoostClassifier(loss_function="MultiClass", classes_count=num_classes, iterations=200, depth=6, learning_rate=0.05, bootstrap_type="Bernoulli", subsample=0.8, colsample_bylevel=0.8, verbose=False, allow_writing_files=False)
+        catboostTimer = timer()
+        catboostModel.fit(X_train, y_train)
+        catboostTimer.toc()
+        printClassicModelSize(catboostModel)
+        print("\nCatBoost Validation")
+        catboostTimerInference = timer()
+        validate_classic_classifier(catboostModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
+        catboostTimerInference.tocStr("CatBoost Inference Time")
+
+    if use_random_forest:
+        from sklearn.ensemble import RandomForestClassifier
+        from qutils.ml.classic.classifier import printClassicModelSize, validate_classic_classifier
+
+        print("\nEntering Random Forest Training Loop")
+        rfModel = RandomForestClassifier(n_estimators=300, max_depth=None, n_jobs=-1)
+        rfTimer = timer()
+        rfModel.fit(X_train, y_train)
+        rfTimer.toc()
+        printClassicModelSize(rfModel)
+        print("\nRandom Forest Validation")
+        rfTimerInference = timer()
+        validate_classic_classifier(rfModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
+        rfTimerInference.tocStr("Random Forest Inference Time")
+
+    if use_extra_trees:
+        from sklearn.ensemble import ExtraTreesClassifier
+        from qutils.ml.classic.classifier import printClassicModelSize, validate_classic_classifier
+
+        print("\nEntering Extra Trees Training Loop")
+        etModel = ExtraTreesClassifier(n_estimators=300, max_depth=None, n_jobs=-1)
+        etTimer = timer()
+        etModel.fit(X_train, y_train)
+        etTimer.toc()
+        printClassicModelSize(etModel)
+        print("\nExtra Trees Validation")
+        etTimerInference = timer()
+        validate_classic_classifier(etModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
+        etTimerInference.tocStr("Extra Trees Inference Time")
+
     if use_nearestNeighbor:
         from qutils.ml.classic.classifier import validate_1NN, print1_NNModelSize
         from sktime.classification.distance_based import KNeighborsTimeSeriesClassifier
@@ -615,6 +784,25 @@ def main():
         _eval_loader = test_loader if (testSet != orbitType) else val_loader
         validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         transformerInference.tocStr("Transformer Inference Time")
+
+    if use_cnn:
+        print("\nEntering 1D-CNN (InceptionTime) Training Loop")
+        model_cnn = InceptionTimeClassifier(input_size, num_classes).to(device).double()
+        optimizer_cnn = torch.optim.Adam(model_cnn.parameters(), lr=learning_rate)
+        scheduler_cnn = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer_cnn,
+            mode='min',             # or 'max' for accuracy
+            factor=0.5,             # shrink LR by 50%
+            patience=schedulerPatience
+        )
+        trainClassifier(model_cnn,optimizer_cnn,scheduler_cnn,[train_loader,test_loader,val_loader],criterion,num_epochs,device,classLabels=classlabels)
+        printModelParmSize(model_cnn)
+
+        print("\n1D-CNN (InceptionTime) Validation")
+        cnnInference = timer()
+        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        validateMultiClassClassifier(model_cnn, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
+        cnnInference.tocStr("1D-CNN (InceptionTime) Inference Time")
 
     if useOE:
         feat_names = ['a','ecc','inc','RAAN','argp','nu']

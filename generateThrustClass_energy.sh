@@ -6,80 +6,80 @@
 ## 10 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 10 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit vleo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 
 #in distribution LEO
 ## 10 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 10 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test leo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 
 
 # in distribution GEO
 ## 10 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 10 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 30 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 ## 100 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit geo --test geo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --energy
+    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees --energy
 
 
 cd gmat/data/classification
@@ -100,53 +100,53 @@ cd ../../..
 ## 10 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 30 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 100 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 10 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 30 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 100 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit leo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 
 # LEO-MEO-GEO to VLEO
 ## 10 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 10 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 30 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 30 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 100 minute cart
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 100 --train_ratio 0.2 --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 10 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 10 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 30 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 30 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 ## 100 minute OE
 python scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py \
     --orbit combined/leo-meo-geo --test vleo --systems 800 --testSys 800 \
-    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer
+    --norm --noise --propMin 100 --train_ratio 0.2 --OE --save --mlp --nearest --minirocket --transformer --cnn --xgboost --catboost --rf --extratrees
 
 cd gmat/data/classification
 # leo out of distribution to VLEO

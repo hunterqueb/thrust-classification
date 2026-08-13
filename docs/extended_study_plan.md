@@ -81,19 +81,26 @@ Steps:
 
 Priority order, cheapest/highest-signal first:
 
-- [ ] **Wire in existing-but-unused Mamba variants** — `qutils.ml.mambaAtt` (Mamba + integrated
-      self-attention) and `qutils.ml.mamba_kda_model.MambaWithLinearAttention` are already implemented
-      in the package but not instantiated in this script. Add them as additional training/eval blocks
-      alongside `model_mamba`, same `train_loader`/`val_loader`/`test_loader` pattern.
-- [ ] **Fix `TransformerClassifier`** (`mambaTimeSeriesClassificationGMATThrusts.py:102`) before drawing
+- [x] **Fix `TransformerClassifier`** (`mambaTimeSeriesClassificationGMATThrusts.py:102`) before drawing
       conclusions from it — it currently runs a full encoder-decoder `nn.Transformer` with `x` fed as
       both `src` and `tgt`, which is atypical for classification. Switch to encoder-only + CLS-token or
       mean-pool head so it's a fair baseline.
-- [ ] **XGBoost / CatBoost** alongside the existing LightGBM path (`use_classic` block, line 428) — same
+      Done: now `nn.TransformerEncoder` with a learnable CLS token + positional embedding; `nhead` falls
+      back automatically if `hidden_size` isn't divisible by 8. Gated behind existing `--transformer` flag.
+- [x] **XGBoost / CatBoost** alongside the existing LightGBM path (`use_classic` block, line 428) — same
       flattened `(N, T·D)` input already prepared, cheap to add as a GBDT bake-off.
-- [ ] **Random Forest / Extra Trees** as a simpler classic-ML floor.
-- [ ] **1D-CNN / InceptionTime** as a non-SSM, non-Transformer deep baseline — commonly competitive at
+      Done: `--xgboost` / `--catboost` flags added. Shared `printClassicModelSize`/`validate_classic_classifier`
+      helpers added to `qutils/ml/classic/classifier.py` so LightGBM/XGBoost/CatBoost/RF/ExtraTrees all
+      reuse one validator instead of duplicating it. CatBoost needs `bootstrap_type="Bernoulli"` to accept
+      `subsample`. XGBoost is wired in but untested on this machine — its native lib needs `libomp`
+      (`brew install libomp` on macOS).
+- [x] **Random Forest / Extra Trees** as a simpler classic-ML floor.
+      Done: `--rf` / `--extratrees` flags added, same flattened-feature path and shared validator.
+- [x] **1D-CNN / InceptionTime** as a non-SSM, non-Transformer deep baseline — commonly competitive at
       this sequence length and cheaper to train than the Transformer.
+      Done: `--cnn` flag adds an `InceptionTimeClassifier` (stacked multi-kernel inception modules,
+      residual connections every 3 modules, GroupNorm instead of BatchNorm so training is robust to a
+      size-1 trailing batch, global average pool + linear head).
 - [ ] **TSFresh / catch22 feature extraction** feeding into a classic classifier — gives an
       interpretable-features alternative to MiniRocket's random-kernel features, useful for a cleaner
       SHAP story.

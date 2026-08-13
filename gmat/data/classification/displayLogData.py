@@ -104,7 +104,7 @@ def save_confusion_matrix(cm: np.ndarray, png: Path, title: str) -> None:
 
     n = cm.shape[0]
     ticks = range(n)
-    label = ["Chemical", "Electric", "Impulsive", "No Thrust"]
+    label = ["No Thrust", "Chemical", "Electric", "Impulsive"]
     plt.xticks(ticks, label)
     plt.yticks(ticks, label)
 
