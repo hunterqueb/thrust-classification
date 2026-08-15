@@ -6,7 +6,7 @@ and its dependency `qutils.ml.classifer.prepareThrustClassificationDatasets`. No
 in `qutils` unless noted otherwise — `qutils/orbital.py` currently only provides `ECI2OE`/`OE2ECI` and
 energy helpers, so both frame additions below are new implementation work, not flag flips.
 
-## 1. Coordinate frames for this study: ROE and Delaunay/Poincaré
+## 1. Coordinate frames for this study: ROE, Delaunay/Poincaré, and ground-station-realistic sensor frames
 
 ### 1.1 Quasi-nonsingular relative orbital elements (ROE)
 
@@ -77,6 +77,122 @@ Steps:
   `--delaunay`/`--poincare` runs produce distinguishable log/artifact filenames, consistent with how
   `--OE`/`--energy`/`--norm` are currently tagged.
 
+### 1.3 Ground-station-realistic sensor frames (AER + range-rate, RA/Dec)
+
+**Motivation**: ROE and Delaunay/Poincaré (1.1/1.2) are still *state*-frames — they assume perfect
+inertial position/velocity knowledge. This track instead represents what a real ground tracking
+system would actually output, split by what's physically realistic per orbit regime rather than one
+frame for everything:
+
+- **AER + range-rate** (`Az, El, Range, dAz, dEl, dRange` — 6 channels) for `leo`/`vleo`/`meo`. Radar
+  power falls off as `1/R⁴`, so ground radar realistically only reaches these regimes — this is the
+  frame a radar-tracking ground station would actually produce.
+- **RA/Dec, angles-only** (`RA, Dec, dRA, dDec` — 4 channels, **no range/range-rate**) for `geo`/`heo`.
+  Real optical SSA sensors (GEODSS-class telescopes) report a bearing only for deep-space objects — a
+  single optical observation genuinely doesn't carry range information at GEO distances. Forcing a
+  range channel onto this regime would misrepresent what a real sensor gives you.
+
+**Status: base implementation built and validated on a small test batch.** Lives in
+`GMAT-Thrust-Data/python/generateSpacecraftThrustOptGroundStation.py` (a ground-station-enabled
+sibling of `generateSpacecraftThrustOpt.py`), plus a standalone diagnostic plotter at
+`GMAT-Thrust-Data/python/testGroundStationReconstruction.py`.
+
+**Design fork — resolved**: went with the GMAT-native path (`GroundStation` + `CoordinateSystem` +
+`CoordinateConverter`) rather than a from-scratch Python GMST implementation, so GMAT owns the
+site-rotation math rather than a hand-rolled reimplementation.
+
+**Shared infrastructure**:
+- [x] Ground-station site definitions. Two concrete sites, hardcoded constants in the script (not yet
+      config-driven): **Orlando, FL** (`28.5383°N, 81.3792°W`, ~sea level — Eastern Range/Cape Canaveral
+      vicinity, radar-realistic, source for AER) and **New Mexico** (`33.9756°N, 107.1809°W`, ~3.23 km alt
+      — Socorro/Magdalena Ridge vicinity, optical-realistic, source for RA/Dec).
+      Still open: move `groundStationLat`/`Lon`/`Alt` into `configs/config.yaml` per the original plan,
+      matching the `parse_config()` pattern used for `lowerAlt`/`chemThrust`/etc.
+- [ ] Absolute-epoch handling: currently a **single fixed epoch shared by every system**
+      (`20 Jul 2020 12:00:00 UTC`, matching the spacecraft's existing `Epoch` field) — the "preferred"
+      per-system epoch randomization from the original plan is **not yet done**. Still open, and worth
+      prioritizing before generating a real training batch, since right now every system in a batch sees
+      the same site-relative geometry pattern.
+- [x] `CoordinateConverter`-based conversion helpers, implemented directly in the generation script
+      rather than as `qutils/orbital.py` additions (deviates from the original plan's proposed file
+      location) — `eciStateToAER(state6, epoch)` and `eciStateToRADEC(state6, epoch)`, both built on a
+      shared `_convert(epoch, state6, destCS)` wrapper around `CoordinateConverter.Convert`.
+- [x] Real GMAT Python API gotchas hit and fixed while building this — worth preserving since they'll
+      bite again on any future GMAT-API coordinate-system work:
+      1. `CoordinateSystem.SetField("Axes", ...)` after a bare `gmat.Construct("CoordinateSystem", name)`
+         silently leaves the `AxisSystem` sub-object unbuilt (`"Cannot initialize NULL axes"` at
+         `gmat.Initialize()`). Fix: pass origin/axes directly to `gmat.Construct("CoordinateSystem", name,
+         origin, axes)`.
+      2. `CoordinateConverter.Convert` is overloaded 18 ways (`A1Mjd`/`Real`/`GmatTime` epoch types ×
+         `Rvector`/raw-array state types × boolean-arg-count variants). `gmat.Rvector6` objects didn't
+         cleanly match any overload in this SWIG build; plain Python lists/floats do
+         (`Convert(Real, Real*, CoordinateSystem*, Real*, CoordinateSystem*)`).
+      3. Fetching the source ECI coordinate system via
+         `earthorb.GetRefObject(gmat.COORDINATE_SYSTEM, "EarthMJ2000Eq")` doesn't reliably return a
+         properly-typed `CoordinateSystem*` for `Convert` to match against. Fix: construct it explicitly
+         (`gmat.Construct("CoordinateSystem", "EciCS", "Earth", "MJ2000Eq")`), same as the two site frames.
+      4. This `Convert` overload returns a `bool` success flag and mutates the passed-in output list in
+         place — it does not return the converted state.
+
+**AER + range-rate (leo/vleo/meo, from Orlando)**:
+- [x] `Az = atan2(y,x)`, `El = asin(z/r)`, `Range = |ρ|` computed from GMAT's own `Topocentric`-axes
+      conversion (not a hand-rolled SEZ rotation). `Range-rate = (ρ·ρ̇)/|ρ|` computed exactly from the
+      converted velocity, not finite-differenced.
+- [x] `dAz`/`dEl` computed via `np.gradient` in a post-loop pass, with `np.unwrap` applied first to avoid
+      spurious spikes at the ±π wrap.
+- [ ] Visibility/elevation-mask handling — **confirmed still needed, not a hypothetical**: the first test
+      batch (3 systems, 30 min) showed the satellite below Orlando's horizon for the entire window
+      (`El` between −86° and −30°). Expected given no masking exists yet, but it means this data isn't
+      yet usable for training as-is — next concrete step for this frame.
+
+**RA/Dec (geo/heo, from New Mexico)**:
+- [x] `RA = atan2(y,x)`, `Dec = asin(z/r)` computed from GMAT's `MJ2000Eq`-axes-at-site conversion, no
+      range channel. `dRA`/`dDec` via the same `np.unwrap` + `np.gradient` post-loop pass as AER.
+- [ ] Window-length-vs-signal check (GEO period vs. propagation window) — not yet run against real
+      GEO/HEO data; the validated test batch above was LEO/VLEO-regime only.
+- [ ] HEO visibility/masking — not yet investigated.
+
+**Validation — done, on a LEO/VLEO test batch (3 systems, 30 min)**:
+- [x] Geometric-bound check: AER `Range` must satisfy `|r_sat| − R_earth ≤ Range ≤ |r_sat| + R_earth`
+      for any ground site. Checked all 90 points — zero violations.
+- [x] Independent cross-check: computed Orlando's ECI position from scratch (spherical Earth, algebraic
+      GMST, no nutation) and compared the resulting chord distance to GMAT's own AER `Range` output —
+      matched within 0.23% (18 km on ~7800 km), fully explained by the independent check's simplified
+      Earth model. Also confirms the `Location2 = 360 − 81.3792` (0–360°E) longitude convention guess was
+      correct — a wrong sign/range convention would have produced an error far larger than 0.23%.
+- [x] RA/Dec parallax-bound check: topocentric vs. geocentric RA/Dec difference stayed under the
+      theoretical max parallax angle for the observed satellite ranges, and scaled with proximity as
+      expected.
+- [x] Rate-channel sanity: `dAz`/`dEl`/`dRA`/`dDec` all smooth, no spurious spikes — the `unwrap` step is
+      working.
+- [x] Visual/diagnostic plotting script (`testGroundStationReconstruction.py`, standalone, no GMAT
+      dependency) — reconstructs a real lat/lon ground track from the ECI truth (via an independent
+      GMST implementation), and renders AER/RA-Dec as sensor-native views (Orlando sky plot, New Mexico
+      RA/Dec trace) rather than attempting an under-determined or unverified-axis-convention inversion
+      back to a literal ground track. Confirmed smooth, continuous, artifact-free tracks on the test
+      batch, consistent with the numeric checks above.
+- [ ] **Not yet validated**: the above all happened in the "satellite below horizon" regime (`El < 0`
+      for the entire test batch) — the `El > 0` / above-horizon case hasn't been visually or numerically
+      confirmed yet. Needs a larger batch or geometry more likely to produce an Orlando overhead pass.
+
+**Channel-width mismatch**: AER (6 ch) and RA/Dec (4 ch) can't be concatenated into one tensor for the
+existing `combined/` multi-regime datasets without padding or a mask channel. Keep AER-regime and
+RA/Dec-regime runs **separate** for this sensor-realism comparison rather than forcing a unified
+combined dataset — cross-regime generalization under mismatched channel counts is a separate design
+problem, not part of this ablation.
+
+**Noise model**: not yet implemented. Still planned — replace the existing Cartesian `--noise`/
+`--velNoise` with frame-appropriate, physically scaled noise (arcsecond-level angular noise for RA/Dec,
+arcminute-level angular + meter-level range + cm/s-level range-rate noise for AER).
+
+**CLI wiring — current state differs from the original plan**: the base implementation computes **both**
+AER (from Orlando) and RA/Dec (from New Mexico) unconditionally for every `propType` run, regardless of
+`orbit_type`, rather than auto-selecting one frame by regime. Simpler for an initial validation pass;
+downstream code decides which of `aerArray*.npz`/`radecArray*.npz` is "the" realistic one for a given
+regime. The original plan's `--orbit`-based auto-select (and `--forceFrame` override) is still worth
+doing once this moves beyond small test batches, to avoid generating and storing an unused frame's data
+at full `num_runs` scale.
+
 ## 2. Additional classifiers
 
 Priority order, cheapest/highest-signal first:
@@ -138,3 +254,17 @@ Priority order, cheapest/highest-signal first:
 4. Run the combined-regime and `propMin` sweeps across the full frame x classifier grid.
 5. Add the remaining classic-ML baselines (XGBoost/CatBoost/RandomForest/InceptionTime/TSFresh) as
    supplementary comparison points, and extend SHAP coverage to LightGBM/MiniRocket.
+6. ~~Resolve the AER/RA-Dec generation-path fork~~ — **done**: went GMAT-native
+   (`generateSpacecraftThrustOptGroundStation.py`), Orlando (AER) + New Mexico (RA/Dec) sites built and
+   round-trip/cross-check validated on a small LEO/VLEO test batch (geometric bound check, independent
+   GMST cross-check within 0.23%, RA/Dec parallax-bound check, and a standalone diagnostic plotting
+   script — all passing). See section 1.3 for the detailed status and the GMAT API gotchas hit along
+   the way.
+7. Remaining before this frame is ready for a real training run: (a) visibility/elevation-mask handling
+   — confirmed necessary, not hypothetical, since the validated test batch never had the satellite above
+   Orlando's horizon; (b) per-system epoch randomization, currently a single fixed epoch shared by every
+   system; (c) move the two site definitions into `configs/config.yaml` instead of hardcoded constants;
+   (d) validate the `El > 0` / above-horizon case, only the below-horizon regime has been checked so far;
+   (e) run the RA/Dec window-length-vs-signal check against real GEO/HEO data, only LEO/VLEO validated so
+   far; (f) add the frame-appropriate sensor noise model; (g) wire the `--orbit`-based auto-select
+   (currently generates both frames unconditionally) once moving beyond small test batches.
