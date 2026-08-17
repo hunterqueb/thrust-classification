@@ -185,13 +185,66 @@ problem, not part of this ablation.
 `--velNoise` with frame-appropriate, physically scaled noise (arcsecond-level angular noise for RA/Dec,
 arcminute-level angular + meter-level range + cm/s-level range-rate noise for AER).
 
-**CLI wiring — current state differs from the original plan**: the base implementation computes **both**
-AER (from Orlando) and RA/Dec (from New Mexico) unconditionally for every `propType` run, regardless of
-`orbit_type`, rather than auto-selecting one frame by regime. Simpler for an initial validation pass;
-downstream code decides which of `aerArray*.npz`/`radecArray*.npz` is "the" realistic one for a given
-regime. The original plan's `--orbit`-based auto-select (and `--forceFrame` override) is still worth
-doing once this moves beyond small test batches, to avoid generating and storing an unused frame's data
-at full `num_runs` scale.
+**CLI wiring (generation side) — current state differs from the original plan**: the base implementation
+computes **both** AER (from Orlando) and RA/Dec (from New Mexico) unconditionally for every `propType`
+run, regardless of `orbit_type`, rather than auto-selecting one frame by regime. Simpler for an initial
+validation pass; downstream code decides which of `aerArray*.npz`/`radecArray*.npz` is "the" realistic
+one for a given regime. The original plan's `--orbit`-based auto-select (and `--forceFrame` override) is
+still worth doing once this moves beyond small test batches, to avoid generating and storing an unused
+frame's data at full `num_runs` scale.
+
+### 1.4 Consuming AER/RA-Dec in the classification pipeline — done
+
+`mambaTimeSeriesClassificationGMATThrusts.py` now has a `--frame {eci,aer,radec}` flag (default `eci`,
+fully backward-compatible — no behavior change unless passed).
+
+- [x] `loadGroundStationDataset()` added to the classification script (not `qutils`, since this frame
+      support is still local/experimental) — loads `{aerArray,radecArray}{Chemical,Electric,ImpBurn,
+      NoThrust}.npz` from the same per-orbit data directory `prepareThrustClassificationDatasets` uses
+      for `statesArray*.npz`, and mirrors that function's exact labeling / IC-group train-val-test split
+      / `DataLoader` construction. Every one of the 12 existing classifiers (LSTM/Mamba/Transformer/CNN/
+      LightGBM/XGBoost/CatBoost/RF/ExtraTrees/1-NN/MiniRocket/MLP) already infers `input_size` generically
+      from `train_data.shape[2]`, so all of them work against the new frames with no further changes.
+- [x] Incompatible-flag guarding: `--OE`/`--energy`/`--noise` are ECI/OE-specific (Cartesian pos/vel
+      noise doesn't map onto Az/El/Range or RA/Dec units) — disabled with a `[warning]` when `--frame`
+      isn't `eci`. `--norm` is repurposed to mean per-channel z-score normalization (fit on the training
+      split) for the new frames, with a `[note]` printed so this isn't a silent behavior difference.
+- [x] `--mlp` (PCA+Hankel-pooled features) is scoped to `--frame eci` only for now — prints a skip
+      message rather than silently doing something wrong; reimplementing PCA/Hankel pooling for the new
+      frames wasn't part of this pass.
+- [x] SHAP feature names (`feat_names`) and log/SHAP-directory naming (`strAdd`, `shap_dir_*`) updated to
+      be frame-aware (`['Az','El','Range','dAz','dEl','dRange']` / `['RA','Dec','dRA','dDec']`).
+- [x] Validated by actually running the script (not just syntax-checking) against a synthetic 4-class
+      dataset built from the real `aerArrayNoThrust.npz`/`radecArrayNoThrust.npz` example files — confirmed
+      correct data-location logging, correct `input_size` inference (6 for AER, 4 for RA/Dec, different
+      Mamba param counts as expected), the warning/note messages firing correctly, the `--mlp` skip
+      message, and a full train → validate → classification-report → confusion-matrix pipeline completing
+      cleanly for both new frames.
+
+### 1.5 Running AER/RA-Dec sweeps at scale — scripted, not yet run for real
+
+- [x] `generateThrustClass_aer.sh` / `generateThrustClass_radec.sh` — mirror `generateThrustClass.sh`'s
+      dataset sweep (vleo/leo/geo in-distribution + leo→vleo and combined/leo-meo-geo→vleo out-of-
+      distribution, 10/30/100 min, `--systems 800 --testSys 800 --train_ratio 0.2`), with `--frame aer`/
+      `--frame radec` on every invocation instead of the cart/OE split (AER/RA-Dec are each a single
+      frame, so no OE sub-loop), and `--noise`/`--mlp` dropped since both are no-ops for these frames.
+- [x] `generateLaTeXTablesColor_aer.sh` / `_radec.sh` — added since neither existed; use `--include-cart`
+      instead of `--combine-features`, since `generateLatexTableCompact.py`'s `is_oe_log()` heuristic
+      (looks for an "OE" token in the log stem) puts every AER/RA-Dec row in its "Cartesian" bucket, and
+      `--include-cart` is what actually emits a populated table instead of the near-random-Cartesian
+      summary paragraph the default path is designed for.
+- [x] `runClassGen.sh` updated to insert the AER and RA/Dec phases (each: generate → tables → wipe)
+      between the existing cart/OE phase and the energy phase. This wipe-between-phases (`removeClassLogs.sh`)
+      is load-bearing, not cosmetic: `displayLogData.py --group-dir` recursively globs every `*.log`
+      under a directory with **no filtering by frame** — `--group-name` only controls the output CSV
+      filename, not which logs get included as input. Considered adding a `--log-pattern` filter to
+      `displayLogData.py` to make phases independent of run order, but the repo already has this exact
+      precedent (the existing cart/OE-vs-energy split relies on the same wipe-between-phases pattern), so
+      kept it consistent rather than introducing a second mechanism.
+- [ ] **Not yet run**: still blocked on the same prerequisite as the rest of section 1.3 — real
+      800-system AER/RA-Dec data doesn't exist yet for any orbit/propMin combination, only the small
+      validation batch. `bash -n` syntax-checked all five touched/new shell scripts; none have been
+      executed end-to-end.
 
 ## 2. Additional classifiers
 
@@ -223,6 +276,19 @@ Priority order, cheapest/highest-signal first:
 - [ ] **Extend `--shap` to LightGBM and MiniRocket** (currently only wired for LSTM/Mamba in `main()`)
       so feature attribution is comparable across the full classifier roster, not just the two deep
       sequence models.
+- [x] **`displayLogData.py`/LaTeX-table pipeline updated for the full 12-model roster** — tested end-to-end
+      against a real log (not just reasoned about abstractly) and found two real bugs, both fixed:
+      1. `RE_PARAMS` only matched digits, so `Total parameters: NaN` (printed by 6 of the 12 models —
+         LightGBM/XGBoost/CatBoost/RF/ExtraTrees/1-NN, since a param count isn't meaningful for them) was
+         silently coerced to `0` in the summary CSV, misreporting them as zero-parameter models in any
+         accuracy-vs-size comparison. Fixed: `Summary.params` is now `float` (was `int`) so it can hold
+         `NaN`, and the regex widened to match it.
+      2. `normalize_models()` in both `generateLatexTable.py` and `generateLatexTableCompact.py` had a
+         stale `"Decision Trees" → "DT"` mapping — the model's printed name changed to `"Decision Trees
+         (LightGBM)"` once XGBoost/CatBoost were added for disambiguation, so the abbreviation silently
+         stopped applying, and none of the 6 new classifiers had abbreviations at all. Fixed with
+         `LightGBM`/`RF`/`ET`/`1-NN`/`CNN`, keeping the old `"Decision Trees"` entry as a legacy alias for
+         pre-rename logs.
 
 ## 3. Data regime extensions
 
@@ -252,8 +318,9 @@ Priority order, cheapest/highest-signal first:
 3. Wire in the already-built Mamba variants (`mambaAtt`, `mamba_kda_model`) and the fixed
    encoder-only Transformer so the classifier roster is on equal footing across all frames.
 4. Run the combined-regime and `propMin` sweeps across the full frame x classifier grid.
-5. Add the remaining classic-ML baselines (XGBoost/CatBoost/RandomForest/InceptionTime/TSFresh) as
-   supplementary comparison points, and extend SHAP coverage to LightGBM/MiniRocket.
+5. ~~Add the remaining classic-ML baselines~~ — **mostly done**: XGBoost/CatBoost/RandomForest/
+   InceptionTime all implemented and validated (section 2). TSFresh/catch22 still open. SHAP coverage
+   still not extended to LightGBM/MiniRocket.
 6. ~~Resolve the AER/RA-Dec generation-path fork~~ — **done**: went GMAT-native
    (`generateSpacecraftThrustOptGroundStation.py`), Orlando (AER) + New Mexico (RA/Dec) sites built and
    round-trip/cross-check validated on a small LEO/VLEO test batch (geometric bound check, independent
@@ -268,3 +335,9 @@ Priority order, cheapest/highest-signal first:
    (e) run the RA/Dec window-length-vs-signal check against real GEO/HEO data, only LEO/VLEO validated so
    far; (f) add the frame-appropriate sensor noise model; (g) wire the `--orbit`-based auto-select
    (currently generates both frames unconditionally) once moving beyond small test batches.
+8. ~~Wire AER/RA-Dec into the classification pipeline and sweep scripts~~ — **done**: `--frame
+   {eci,aer,radec}` added to `mambaTimeSeriesClassificationGMATThrusts.py` (section 1.4), and
+   `generateThrustClass_aer.sh`/`_radec.sh` + matching LaTeX-table scripts + updated `runClassGen.sh`
+   added (section 1.5). All validated on synthetic/small data and syntax-checked respectively. Still
+   blocked on the same prerequisite as everything else in this track: real 800-system AER/RA-Dec data
+   doesn't exist yet, so none of this has been run end-to-end for real.
