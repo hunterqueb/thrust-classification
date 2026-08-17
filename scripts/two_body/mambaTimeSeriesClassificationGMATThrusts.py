@@ -3,7 +3,18 @@
 
 # call the script from the main folder directory, adding --save saves the output to a log file in the location of the datasets
 # $ python scripts/classification/mambaTimeSeriesClassificationGMATThrusts.py \
-# --systems 10000 --propMin 5 --OE --norm --orbit vleo 
+# --systems 10000 --propMin 5 --OE --norm --orbit vleo
+#
+# --frame selects the feature representation:
+#   eci    (default) Cartesian ECI states, or OE via --OE -- loaded via qutils.prepareThrustClassificationDatasets
+#   aer    Az/El/Range/dAz/dEl/dRange from a radar-realistic ground station (leo/vleo/meo)
+#   radec  RA/Dec/dRA/dDec, angles-only, from an optical-realistic ground station (geo/heo)
+# aer/radec expect {frame}Array{Chemical,Electric,ImpBurn,NoThrust}.npz in the same per-orbit data
+# directory as statesArray*.npz (see generateSpacecraftThrustOptGroundStation.py in GMAT-Thrust-Data).
+# --OE/--energy/--noise only apply to --frame eci; --norm still applies but means per-channel
+# z-score normalization (fit on the training split) instead of the ECI/OE-specific normalization.
+# $ python scripts/classification/mambaTimeSeriesClassificationGMATThrusts.py \
+# --systems 800 --propMin 30 --frame aer --orbit vleo
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -37,6 +48,10 @@ parser.add_argument('--catboost', dest="use_catboost", action='store_true', help
 parser.add_argument('--rf', dest="use_random_forest", action='store_true', help='Use Random Forest classifier for comparison (same flattened features as LightGBM)')
 parser.add_argument('--extratrees', dest="use_extra_trees", action='store_true', help='Use Extra Trees classifier for comparison (same flattened features as LightGBM)')
 parser.add_argument('--cnn', dest="use_cnn", action='store_true', help='Use a 1D-CNN (InceptionTime-style) classifier for comparison')
+parser.add_argument("--frame", type=str, default="eci", choices=["eci", "aer", "radec"],
+                     help="Feature representation: 'eci' (default, Cartesian/OE via --OE), "
+                          "'aer' (Az/El/Range/rates, radar-realistic ground station), "
+                          "'radec' (RA/Dec/rates, angles-only, optical-realistic ground station)")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
@@ -90,6 +105,24 @@ use_catboost = args.use_catboost
 use_random_forest = args.use_random_forest
 use_extra_trees = args.use_extra_trees
 use_cnn = args.use_cnn
+frame = args.frame
+
+if frame != "eci":
+    _disabled = []
+    if useOE:
+        _disabled.append("--OE")
+    if useEnergy:
+        _disabled.append("--energy")
+    if useNoise:
+        _disabled.append("--noise")
+    if _disabled:
+        print(f"[warning] {', '.join(_disabled)} only apply to --frame eci; ignoring for --frame {frame}.")
+    useOE = False
+    useEnergy = False
+    useNoise = False
+    if useNorm:
+        print(f"[note] --norm for --frame {frame} means per-channel z-score normalization "
+              f"fit on the training split, not the ECI/OE-specific normalization.")
 
 if args.pca is not None and args.pca > 0:
     pca_enabled = True
@@ -346,6 +379,8 @@ def eval_epoch(model, loader, device):
 
 
 strAdd = ""
+if frame != "eci":
+    strAdd = strAdd + frame.upper() + "_"
 if useEnergy:
     strAdd = strAdd + "Energy_"
 if useOE:
@@ -381,8 +416,9 @@ print(f"Training with {int(4*train_ratio*numRandSys)} systems")
 
 logLoc = "gmat/data/classification/"+str(orbitType)+"/" + str(numMinProp) + "min-" + str(numRandSys) + "/"
 logFileLoc = logLoc + str(numMinProp) + "min" + str(numRandSys)+ strAdd +'.log'
-shap_dir_mamba = logLoc+ f"shap/mamba_{orbitType}_eval_{'OE' if useOE else 'cart'}_"+str(strAdd)
-shap_dir_lstm = logLoc+ f"shap/lstm_{orbitType}_eval_{'OE' if useOE else 'cart'}_"+str(strAdd)
+_frameTag = frame if frame != "eci" else ("OE" if useOE else "cart")
+shap_dir_mamba = logLoc+ f"shap/mamba_{orbitType}_eval_{_frameTag}_"+str(strAdd)
+shap_dir_lstm = logLoc+ f"shap/lstm_{orbitType}_eval_{_frameTag}_"+str(strAdd)
 
 if save_to_log:
     import sys
@@ -438,8 +474,107 @@ class HybridClassifier(nn.Module):
         
         # Pass the last hidden state through a linear layer for classification
         logits = self.fc(last_hidden)  # [batch_size, num_classes]
-        
+
         return logits
+
+
+def loadGroundStationDataset(
+    frame,                 # "aer" or "radec"
+    data_config,
+    orbit_type, systems, num_min_prop,
+    test_set, test_systems,
+    train_ratio, val_ratio, test_ratio,
+    batch_size=16,
+    normalize=False,
+):
+    """Load {frame}Array{Chemical,Electric,ImpBurn,NoThrust}.npz from the same per-orbit data
+    directory prepareThrustClassificationDatasets uses for statesArray*.npz (see
+    generateSpacecraftThrustOptGroundStation.py in GMAT-Thrust-Data), and mirror that function's
+    labeling / IC-group train-val-test split / DataLoader construction so every classifier below
+    -- all of which only assume `train_data.shape[2]` as the feature width -- works unchanged.
+
+    AER channels:   [Az, El, Range, dAz, dEl, dRange]   (6)
+    RA/Dec channels: [RA, Dec, dRA, dDec]                (4)
+    """
+    prefix = "aerArray" if frame == "aer" else "radecArray"
+    noThrustLabel, chemicalLabel, electricLabel, impBurnLabel = 0, 1, 2, 3
+
+    dataLoc      = data_config['classification'] + orbit_type + "/" + str(num_min_prop) + "min-" + str(systems)
+    dataLoc_test = data_config['classification'] + test_set   + "/" + str(num_min_prop) + "min-" + str(test_systems)
+    print(f"Training data location: {dataLoc}")
+    print(f"Test data location: {dataLoc_test}")
+
+    def _load(loc):
+        chem = np.load(f"{loc}/{prefix}Chemical.npz")[f"{prefix}Chemical"]
+        elec = np.load(f"{loc}/{prefix}Electric.npz")[f"{prefix}Electric"]
+        imp  = np.load(f"{loc}/{prefix}ImpBurn.npz")[f"{prefix}ImpBurn"]
+        none = np.load(f"{loc}/{prefix}NoThrust.npz")[f"{prefix}NoThrust"]
+        return chem, elec, imp, none
+
+    def _labels(chem, elec, imp, none):
+        return (
+            np.full((chem.shape[0], 1), chemicalLabel),
+            np.full((elec.shape[0], 1), electricLabel),
+            np.full((imp.shape[0], 1),  impBurnLabel),
+            np.full((none.shape[0], 1), noThrustLabel),
+        )
+
+    def _ic_split(n_ic):
+        n_train_ic = int(np.floor(train_ratio * n_ic))
+        n_val_ic   = int(np.floor(val_ratio   * n_ic))
+        n_test_ic  = n_ic - n_train_ic - n_val_ic
+        assert n_test_ic > 0, "Ratios leave no ICs for test; reduce train/val."
+        perm_ic = np.random.permutation(n_ic)
+        return perm_ic[:n_train_ic], perm_ic[n_train_ic:n_train_ic + n_val_ic], perm_ic[n_train_ic + n_val_ic:]
+
+    chem, elec, imp, none = _load(dataLoc)
+    n_ic = chem.shape[0]
+    labelsChem, labelsElec, labelsImp, labelsNone = _labels(chem, elec, imp, none)
+    dataset = np.concatenate((chem, elec, imp, none), axis=0)
+    dataset_label = np.concatenate((labelsChem, labelsElec, labelsImp, labelsNone), axis=0)
+
+    groups = np.tile(np.arange(n_ic, dtype=np.int64), 4)
+    train_ic, val_ic, test_ic = _ic_split(n_ic)
+    train_mask = np.isin(groups, train_ic)
+    val_mask   = np.isin(groups, val_ic)
+    test_mask  = np.isin(groups, test_ic)
+
+    train_data, train_label = dataset[train_mask], dataset_label[train_mask]
+    val_data,   val_label   = dataset[val_mask],   dataset_label[val_mask]
+
+    if test_set != orbit_type or test_systems != systems:
+        chem_t, elec_t, imp_t, none_t = _load(dataLoc_test)
+        n_ic_test = chem_t.shape[0]
+        labelsChem_t, labelsElec_t, labelsImp_t, labelsNone_t = _labels(chem_t, elec_t, imp_t, none_t)
+        dataset_test = np.concatenate((chem_t, elec_t, imp_t, none_t), axis=0)
+        dataset_label_test = np.concatenate((labelsChem_t, labelsElec_t, labelsImp_t, labelsNone_t), axis=0)
+
+        groups_t = np.tile(np.arange(n_ic_test, dtype=np.int64), 4)
+        _, _, test_ic_t = _ic_split(n_ic_test)
+        test_mask_t = np.isin(groups_t, test_ic_t)
+        test_data, test_label = dataset_test[test_mask_t], dataset_label_test[test_mask_t]
+    else:
+        test_data, test_label = dataset[test_mask], dataset_label[test_mask]
+
+    # ----- optional per-channel z-score normalization, fit on the training split only -----
+    if normalize:
+        mean = train_data.reshape(-1, train_data.shape[-1]).mean(axis=0)
+        std  = train_data.reshape(-1, train_data.shape[-1]).std(axis=0)
+        std[std == 0] = 1.0
+        train_data = (train_data - mean) / std
+        val_data   = (val_data   - mean) / std
+        test_data  = (test_data  - mean) / std
+
+    from torch.utils.data import TensorDataset, DataLoader
+    train_ds = TensorDataset(torch.from_numpy(train_data).double(), torch.from_numpy(train_label).squeeze(1).long())
+    val_ds   = TensorDataset(torch.from_numpy(val_data).double(),   torch.from_numpy(val_label).squeeze(1).long())
+    test_ds  = TensorDataset(torch.from_numpy(test_data).double(),  torch.from_numpy(test_label).squeeze(1).long())
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  pin_memory=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, pin_memory=True)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, pin_memory=True)
+
+    return train_loader, val_loader, test_loader, train_data, train_label, val_data, val_label, test_data, test_label
+
 
 def main():
     import yaml
@@ -481,7 +616,20 @@ def main():
         val_ratio = train_ratio  
         test_ratio = (1.0 - train_ratio - val_ratio) # not used in network training, only for splitting the data and final evaluation
 
-    train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label = prepareThrustClassificationDatasets(yaml_config,dataConfig,output_np=True,vel_noise_std=velNoise,pos_noise_std=1e3*velNoise,train_ratio=train_ratio,test_ratio=test_ratio,val_ratio=val_ratio,pca_enabled=pca_enabled,pca_mode="hankel",hankel_pool="mean")
+    if frame == "eci":
+        train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label = prepareThrustClassificationDatasets(yaml_config,dataConfig,output_np=True,vel_noise_std=velNoise,pos_noise_std=1e3*velNoise,train_ratio=train_ratio,test_ratio=test_ratio,val_ratio=val_ratio,pca_enabled=pca_enabled,pca_mode="hankel",hankel_pool="mean")
+    else:
+        if pca_enabled:
+            print(f"[warning] --pca is only wired up for --frame eci (via prepareThrustClassificationDatasets); ignoring for --frame {frame}.")
+        train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label = loadGroundStationDataset(
+            frame=frame,
+            data_config=dataConfig,
+            orbit_type=orbitType, systems=numRandSys, num_min_prop=numMinProp,
+            test_set=testSet, test_systems=testSys,
+            train_ratio=train_ratio, val_ratio=val_ratio, test_ratio=test_ratio,
+            batch_size=16,
+            normalize=useNorm,
+        )
 
     # Hyperparameters
     input_size = train_data.shape[2] 
@@ -733,7 +881,11 @@ def main():
         _eval_loader = test_loader if (testSet != orbitType) else val_loader
         validateMultiClassClassifier(model_LSTM,_eval_loader,criterion,num_classes,device,classlabels,printReport=True)
         LSTMInference.tocStr("LSTM Inference Time")
-        if useOE:
+        if frame == "aer":
+            feat_names = ['Az','El','Range','dAz','dEl','dRange']
+        elif frame == "radec":
+            feat_names = ['RA','Dec','dRA','dDec']
+        elif useOE:
             feat_names = ['a','ecc','inc','RAAN','argp','nu']
         else:
             feat_names = ['x','y','z','vx','vy','vz']
@@ -804,7 +956,11 @@ def main():
         validateMultiClassClassifier(model_cnn, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         cnnInference.tocStr("1D-CNN (InceptionTime) Inference Time")
 
-    if useOE:
+    if frame == "aer":
+        feat_names = ['Az','El','Range','dAz','dEl','dRange']
+    elif frame == "radec":
+        feat_names = ['RA','Dec','dRA','dDec']
+    elif useOE:
         feat_names = ['a','ecc','inc','RAAN','argp','nu']
     else:
         feat_names = ['x','y','z','vx','vy','vz']
@@ -860,7 +1016,10 @@ def main():
 
 
     # needs to be last, PCA is not used for the other models and we want to keep the same data for all non-MLP models if PCA is enabled, so we do it after training and evaluating those models
-    if useMLP is True:
+    if useMLP is True and frame != "eci":
+        print(f"[warning] --mlp (PCA+Hankel-pooled features) is currently only implemented for "
+              f"--frame eci; skipping for --frame {frame}.")
+    if useMLP is True and frame == "eci":
         train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label, pca_state = prepareThrustClassificationDatasets(
         yaml_config,
         dataConfig,
