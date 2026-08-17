@@ -94,9 +94,14 @@ def is_oe_log(stem: str) -> bool:
 
 def normalize_models(df: pd.DataFrame) -> pd.DataFrame:
     mapping = {
-        "Decision Trees": "DT",
+        "Decision Trees": "DT",  # legacy alias: pre-rename logs used this bare name for LightGBM
+        "Decision Trees (LightGBM)": "LightGBM",
         "Mamba": "S4",
         "LSTM": "LSTM",
+        "Random Forest": "RF",
+        "Extra Trees": "ET",
+        "Nearest Neighbor": "1-NN",
+        "1D-CNN (InceptionTime)": "CNN",
     }
     g = df.copy()
     g["model_display"] = g["model"].map(mapping).fillna(g["model"])

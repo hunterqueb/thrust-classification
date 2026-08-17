@@ -32,7 +32,7 @@ RE_EPOCH_LINE  = re.compile(r"^Epoch\s*\[(\d+)/(\d+)\]")
 RE_TRAIN_LOSS  = re.compile(r"Training Loss:\s*([\d.]+)")
 RE_VAL_ACC     = re.compile(r"Validation Accuracy:\s*([\d.]+)%")
 RE_VAL_LOSS    = re.compile(r"Validation Loss:\s*([\d.]+)")
-RE_PARAMS      = re.compile(r"Total parameters:\s*(\d+)")
+RE_PARAMS      = re.compile(r"Total parameters:\s*(\d+|NaN)")
 RE_MEMORY      = re.compile(r"Total memory \(MB\):\s*([\d.]+)")
 RE_TIME        = re.compile(r"Elapsed time is\s*([\d.]+)\s*seconds")
 
@@ -53,7 +53,10 @@ class Summary:
     best_epoch: int
     epochs_trained: int
     final_val_loss: float
-    params: int
+    params: float  # float, not int -- classic-ML models (LightGBM/XGBoost/CatBoost/RF/ExtraTrees/1-NN)
+                    # print "Total parameters: NaN" since a param count isn't meaningful for them; NaN
+                    # can't be represented in an int column, and coercing it to 0 would misreport them
+                    # as zero-parameter models in any accuracy-vs-size comparison.
     memory_mb: float
     training_time_s: float
     early_stopping: bool
@@ -208,7 +211,14 @@ def summarize(model: str, block: str) -> Tuple[Summary, pd.DataFrame]:
     losses     = [float(x) for x in RE_VAL_LOSS.findall(block)]
     final_loss = losses[-1] if losses else float("nan")
 
-    params = int(RE_PARAMS.search(block).group(1)) if RE_PARAMS.search(block) else 0
+    _params_match = RE_PARAMS.search(block)
+    if _params_match is None:
+        params = float("nan")
+    elif _params_match.group(1) == "NaN":
+        params = float("nan")  # non-parametric / not-applicable models (LightGBM, XGBoost, CatBoost,
+                                # Random Forest, Extra Trees, 1-NN) -- not a zero-parameter model
+    else:
+        params = float(_params_match.group(1))
     mem    = float(RE_MEMORY.search(block).group(1)) if RE_MEMORY.search(block) else float("nan")
     time_s = float(RE_TIME.search(block).group(1)) if RE_TIME.search(block) else float("nan")
 
