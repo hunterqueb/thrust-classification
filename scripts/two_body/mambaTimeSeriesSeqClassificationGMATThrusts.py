@@ -367,8 +367,8 @@ def prepareInSequenceThrustClassificationDatasets(
     test_set = yaml_config['test_dataset']
     test_systems = yaml_config['test_systems']
 
-    dataLoc = data_config['classification'] + train_set + "/" + str(numMinProp) + "min-" + str(systems)
-    dataLoc_test = data_config['classification'] + test_set + "/" + str(numMinProp) + "min-" + str(test_systems)
+    dataLoc = data_config['seqClassification'] + train_set + "/" + str(numMinProp) + "min-" + str(systems)
+    dataLoc_test = data_config['seqClassification'] + test_set + "/" + str(numMinProp) + "min-" + str(test_systems)
 
     if not supress_print:
         print(f"Training data location: {dataLoc}")
