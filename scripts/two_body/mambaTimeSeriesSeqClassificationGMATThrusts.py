@@ -1465,7 +1465,7 @@ def main():
     if use_random_forest:
         from sklearn.ensemble import RandomForestClassifier
         from qutils.ml.classic.classifier import printClassicModelSize
-        ctor = lambda nc: RandomForestClassifier(n_estimators=300, max_depth=None, n_jobs=-1)
+        ctor = lambda nc: RandomForestClassifier(n_estimators=300, max_depth=30, n_jobs=-1)
         runClassicMLModes("Random Forest", ctor, printClassicModelSize,
                            train_data, train_joint, train_stage1, train_stage2,
                            eval_data, eval_joint, eval_stage1, eval_stage2,
@@ -1474,7 +1474,7 @@ def main():
     if use_extra_trees:
         from sklearn.ensemble import ExtraTreesClassifier
         from qutils.ml.classic.classifier import printClassicModelSize
-        ctor = lambda nc: ExtraTreesClassifier(n_estimators=300, max_depth=None, n_jobs=-1)
+        ctor = lambda nc: ExtraTreesClassifier(n_estimators=300, max_depth=30, n_jobs=-1)
         runClassicMLModes("Extra Trees", ctor, printClassicModelSize,
                            train_data, train_joint, train_stage1, train_stage2,
                            eval_data, eval_joint, eval_stage1, eval_stage2,
