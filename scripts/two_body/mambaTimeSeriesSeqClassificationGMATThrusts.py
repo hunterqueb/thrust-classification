@@ -124,6 +124,7 @@ if args.pca is not None and args.pca > 0:
 else:
     pca_n_components = 0.95
 
+import os
 import torch
 import numpy as np
 import pandas as pd
@@ -131,6 +132,9 @@ from torch import nn
 import torch.optim as optim
 from sklearn.metrics import precision_recall_fscore_support, classification_report, confusion_matrix
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib
+matplotlib.use("Agg")  # headless-safe: this script is typically run over SSH / redirected to a log file
+import matplotlib.pyplot as plt
 
 from qutils.tictoc import timer
 from qutils.ml.utils import getDevice, printModelParmSize
@@ -163,7 +167,14 @@ if strAdd.endswith("_"):
 print(f"Training with {int(4*train_ratio*numRandSys)} systems")
 
 logLoc = "gmat/data/seqClassification/" + str(orbitType) + "/" + str(numMinProp) + "min-" + str(numRandSys) + "/"
-logFileLoc = logLoc + str(numMinProp) + "min" + str(numRandSys) + strAdd + '.log'
+logStem = str(numMinProp) + "min" + str(numRandSys) + strAdd
+logFileLoc = logLoc + logStem + '.log'
+
+# Per-timestep sequence-prediction plots (see plotSequencePrediction) are generated regardless of
+# --save, since they're a standalone visual artifact rather than part of the redirected log.
+plotLoc = logLoc + "plots/"
+if not os.path.exists(plotLoc):
+    os.makedirs(plotLoc)
 
 if save_to_log:
     from contextlib import redirect_stdout, redirect_stderr
@@ -177,7 +188,6 @@ if save_to_log:
     import warnings
     warnings.filterwarnings("ignore")
 
-    import os
     if not os.path.exists(logLoc):
         os.makedirs(logLoc)
     print("saving log output to {}".format(logFileLoc))
@@ -863,6 +873,60 @@ def _predictPerTimestepNeural(model, loader, device):
     return np.concatenate(all_joint, axis=0), np.concatenate(all_stage1, axis=0), np.concatenate(all_pred, axis=0)
 
 
+def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, mode_label="Joint"):
+    """Plots true vs. predicted per-timestep class labels over time, one panel per class present
+    in y_true, using a representative example trajectory for each -- so a single figure shows how
+    well {model_name} tracks every class the model has to distinguish, not just one example.
+
+    y_true/y_pred: [N, T] per-timestep label grids in the SAME label space as class_names (index i
+    -> class_names[i]). That's the only requirement, so this same function plots joint 4-class
+    predictions from ANY backbone family: per-timestep neural models (via _predictPerTimestepNeural),
+    classic-ML/GBDT Hankel-window models (via predictClassicPerTimestep), PCA+MLP (via
+    predictPCAMLPPerTimestep), or a whole-trajectory model's single decision broadcast across every
+    timestep (MiniRocket/hybrid stage 1) -- whatever produced y_pred, once it's an [N, T] grid in
+    this label space.
+    """
+    num_classes = len(class_names)
+    example_rows = {}
+    for c in range(num_classes):
+        rows = np.where((y_true == c).any(axis=1))[0]
+        if rows.size:
+            example_rows[c] = int(rows[0])
+
+    classes_present = sorted(example_rows.keys())
+    if not classes_present:
+        print(f"[plotSequencePrediction] no examples found for {model_name} {mode_label}; skipping plot.")
+        return None
+
+    fig, axes = plt.subplots(len(classes_present), 1, figsize=(10, 2.6 * len(classes_present)),
+                              sharex=True, squeeze=False)
+    axes = axes[:, 0]
+
+    T = y_true.shape[1]
+    t = np.arange(T)
+    for ax, c in zip(axes, classes_present):
+        idx = example_rows[c]
+        ax.step(t, y_true[idx], where='post', label='True', linewidth=2, color='black')
+        ax.step(t, y_pred[idx], where='post', label='Predicted', linewidth=1.5, linestyle='--', color='tab:orange')
+        ax.set_yticks(range(num_classes))
+        ax.set_yticklabels(class_names)
+        ax.set_ylim(-0.5, num_classes - 0.5)
+        ax.set_ylabel("Class")
+        ax.set_title(f"Example trajectory containing '{class_names[c]}' (row {idx})", fontsize=10)
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(alpha=0.3)
+
+    axes[-1].set_xlabel("Timestep")
+    fig.suptitle(f"{model_name} {mode_label} -- Per-Timestep Sequence Prediction")
+    fig.tight_layout()
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved sequence prediction plot -> {save_path}")
+    return save_path
+
+
 def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=True):
     """y_true_joint/y_true_stage1/pred_stage1: [N,T]; pred_stage2: [N,T] in {0,1,2}. Combines
     stage1 (thrust yes/no) and stage2 (Chemical/Electric/Impulsive) predictions into a single
@@ -980,6 +1044,12 @@ def runClassicFamily(name, classifier_ctor, num_classes, mode_name, class_names,
     tInf = timer()
     evaluateClassicPerTimestep(clf, eval_data, eval_labels, class_names, hankel_L=hankel_L, pad_idx=pad_idx, print_report=True)
     tInf.tocStr(f"{name} ({mode_name}) Inference Time")
+
+    if mode_name == "joint":
+        pred_grid = predictClassicPerTimestep(clf, eval_data, hankel_L)
+        plotSequencePrediction(name, eval_labels, pred_grid, class_names,
+                                os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_joint_{logStem}.png"),
+                                mode_label="Joint")
     return clf
 
 
@@ -1003,6 +1073,15 @@ def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data,
     clf2.fit(X_train2, y_train2)
     t.toc()
     size_fn(clf2)
+
+    # Classic-ML models have no per-epoch training loop, so -- unlike the neural backbones, whose
+    # Stage 2 gets a genuine standalone 3-class evaluation for free as part of its own per-epoch
+    # validation -- Stage 2 here would otherwise never be scored except gated through Stage 1's
+    # predictions in the combined cascade report below. Score it standalone first so cascade
+    # shortfalls stay diagnosable as bad detection vs. bad typing, matching the neural comparison.
+    print(f"\n{name} Stage 2 (Type Classifier) Standalone Validation")
+    evaluateClassicPerTimestep(clf2, eval_data, eval_stage2, STAGE2_CLASS_NAMES,
+                                hankel_L=hankel_L, pad_idx=pad_idx, print_report=True)
 
     print(f"\n{name} Cascade Evaluation")
     tInf = timer()
@@ -1377,6 +1456,11 @@ def main():
                                           class_names=JOINT_CLASS_NAMES, print_report=True)
             jointInference.tocStr(f"{backbone.upper()} Joint Inference Time")
 
+            y_true_grid, _, pred_grid = _predictPerTimestepNeural(model_joint, eval_loader, device)
+            plotSequencePrediction(backbone.upper(), y_true_grid, pred_grid, JOINT_CLASS_NAMES,
+                                    os.path.join(plotLoc, f"seqpred_{backbone.upper()}_joint_{logStem}.png"),
+                                    mode_label="Joint")
+
         if run_cascade:
             print(f"\nEntering {backbone.upper()} Stage 1 (Detector) Training Loop")
             model_stage1 = build_model(backbone, 2, input_size, hidden_size, num_layers)
@@ -1389,6 +1473,13 @@ def main():
             train_model(model_stage2, train_loader, val_loader, num_epochs=num_epochs, num_classes=3,
                         mode='stage2', schedulerPatience=schedulerPatience)
             printModelParmSize(model_stage2)
+
+            # Standalone post-training snapshot on the same class_names/eval_loader as the classic-ML
+            # cascade path's equivalent print, so Stage 2 is directly comparable across every backbone
+            # family rather than only via its own per-epoch training validation.
+            print(f"\n{backbone.upper()} Stage 2 (Type Classifier) Standalone Validation")
+            validateInSequenceClassifier(model_stage2, eval_loader, mode='stage2', num_classes=3, device=device,
+                                          class_names=STAGE2_CLASS_NAMES, print_report=True)
 
             print(f"\n{backbone.upper()} Cascade Evaluation")
             cascadeInference = timer()

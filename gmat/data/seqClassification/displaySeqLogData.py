@@ -64,6 +64,17 @@ RE_STAGE2_COND_ACC = re.compile(
 )
 RE_STAGE1_ONLY_ACC = re.compile(r"Stage-1 \(detector-only\) accuracy:\s*([\d.]+)%")
 
+# Header anchors used to pull the right report out of a cascade Stage 2 block, which can contain
+# two or three (Accuracy/Per-Class Accuracy/Classification Report/Confusion Matrix) quadruples
+# depending on backbone family and script version: a standalone Stage 2 report (present once the
+# training script prints one for both neural and classic-ML backbones; absent in older logs),
+# the Cascade Stage 1 standalone report, and the Cascade End-to-End report. Anchoring on each
+# report's own header -- rather than counting quadruples positionally -- stays correct regardless
+# of which subset is present.
+RE_STAGE2_STANDALONE_HDR = re.compile(r"Stage 2 \(Type Classifier\) Standalone Validation")
+RE_CASCADE_STAGE1_HDR = re.compile(r"---\s*Cascade Stage 1 \(Detector\) Standalone Metrics\s*---")
+RE_CASCADE_E2E_HDR = re.compile(r"---\s*Cascade End-to-End \(Stage1 -> Stage2 combined\) Metrics\s*---")
+
 APPROACH_BY_COMPONENT = {
     "Joint": "joint",
     "Stage1": "cascade",
@@ -258,33 +269,38 @@ def parse_confusion_matrix_lines(text: str) -> np.ndarray | None:
     return np.array(rows, dtype=int) if rows else None
 
 
-def find_eval_sections(block: str) -> List[Dict[str, Any]]:
-    """Finds every (Accuracy / Per-Class Accuracy / Classification Report / Confusion Matrix)
-    quadruple in a block, in document order. A Joint (or solo-stage) block has exactly one; a
-    cascade Stage 2 block -- which also carries the trailing Cascade Evaluation text -- has
-    exactly two: stage-1-standalone, then end-to-end."""
-    accs = list(RE_OVERALL_ACC.finditer(block))
-    pcas = list(RE_PERCLASS_ACC_BLOCK.finditer(block))
-    crs = list(RE_CLASS_REPORT.finditer(block))
-    cms = list(RE_CONF_MATRIX_BLOCK.finditer(block))
-    n = min(len(accs), len(pcas), len(crs), len(cms))
+def _extract_section(text: str) -> Dict[str, Any] | None:
+    """Extracts the FIRST (Accuracy / Per-Class Accuracy / Classification Report / Confusion
+    Matrix) quadruple found in text, or None if any piece is missing. A Joint or solo-stage block
+    always has exactly one such quadruple, so this suffices there; for a cascade Stage 2 block
+    (which can carry two or three quadruples), use find_eval_section_after to anchor on a specific
+    report's own header first."""
+    m_acc = RE_OVERALL_ACC.search(text)
+    m_pca = RE_PERCLASS_ACC_BLOCK.search(text)
+    m_cr = RE_CLASS_REPORT.search(text)
+    m_cm = RE_CONF_MATRIX_BLOCK.search(text)
+    if not (m_acc and m_pca and m_cr and m_cm):
+        return None
+    per_class_acc = {lbl.strip(): float(pct) for lbl, pct, _c, _t in RE_PERCLASS_LINE.findall(m_pca.group(1))}
+    return {
+        "accuracy": float(m_acc.group(1)),
+        "n_correct": int(m_acc.group(2)),
+        "n_total": int(m_acc.group(3)),
+        "per_class_accuracy": per_class_acc,
+        "labels": list(per_class_acc.keys()),
+        "class_df": parse_classification_block(m_cr.group(1)),
+        "confusion_matrix": parse_confusion_matrix_lines(m_cm.group(1)),
+    }
 
-    sections: List[Dict[str, Any]] = []
-    for i in range(n):
-        acc_m, pca_m, cr_m, cm_m = accs[i], pcas[i], crs[i], cms[i]
-        per_class_acc = {lbl.strip(): float(pct) for lbl, pct, _c, _t in RE_PERCLASS_LINE.findall(pca_m.group(1))}
-        class_df = parse_classification_block(cr_m.group(1))
-        cm = parse_confusion_matrix_lines(cm_m.group(1))
-        sections.append({
-            "accuracy": float(acc_m.group(1)),
-            "n_correct": int(acc_m.group(2)),
-            "n_total": int(acc_m.group(3)),
-            "per_class_accuracy": per_class_acc,
-            "labels": list(per_class_acc.keys()),
-            "class_df": class_df,
-            "confusion_matrix": cm,
-        })
-    return sections
+
+def find_eval_section_after(block: str, header: re.Pattern) -> Dict[str, Any] | None:
+    """Finds header in block, then extracts the report quadruple immediately following it (the
+    first one found in the remaining text) -- correct regardless of how many other reports follow
+    later in the same block."""
+    m = header.search(block)
+    if not m:
+        return None
+    return _extract_section(block[m.end():])
 
 
 # ───── Summary builders ─────
@@ -391,6 +407,7 @@ def build_comparison(eval_df: pd.DataFrame) -> pd.DataFrame:
         joint = grp[grp["eval_stage"] == "joint_4class"]
         end2end = grp[grp["eval_stage"] == "cascade_end_to_end"]
         stage1 = grp[grp["eval_stage"] == "cascade_stage1_standalone"]
+        stage2 = grp[grp["eval_stage"] == "cascade_stage2_standalone"]
         s1solo = grp[grp["eval_stage"] == "stage1_solo"]
         s2solo = grp[grp["eval_stage"] == "stage2_solo"]
 
@@ -413,6 +430,10 @@ def build_comparison(eval_df: pd.DataFrame) -> pd.DataFrame:
 
         if not stage1.empty:
             row["Cascade_Stage1_Detector_Accuracy"] = stage1.iloc[0]["accuracy"]
+            row["Cascade_Stage1_Detector_Macro_F1"] = stage1.iloc[0]["macro_f1"]
+        if not stage2.empty:
+            row["Cascade_Stage2_Standalone_Accuracy"] = stage2.iloc[0]["accuracy"]
+            row["Cascade_Stage2_Standalone_Macro_F1"] = stage2.iloc[0]["macro_f1"]
         if not s1solo.empty:
             row["Stage1_Solo_Accuracy"] = s1solo.iloc[0]["accuracy"]
         if not s2solo.empty:
@@ -536,21 +557,30 @@ def save_comparison_plot(df: pd.DataFrame, png: Path) -> None:
 def save_stage_cascade_comparison_plot(eval_df: pd.DataFrame, run_df: pd.DataFrame, png: Path) -> None:
     """Compares cascade Stage 1 (detector) models against each other across backbones, and cascade
     Stage 2 (type classifier) models against each other across backbones -- i.e. within-stage,
-    not joint vs. cascade. Stage 1 has its own standalone Accuracy/Macro-F1 report. Stage 2 has no
-    standalone accuracy report in cascade mode (only the combined stage1->stage2 result is
-    evaluated end-to-end), so it's compared on the two metrics that do isolate its own typing
-    skill: the accuracy conditioned on stage 1 detecting correctly, and the macro-F1 it reached on
-    its own 3-class validation split during training."""
+    not joint vs. cascade. Both stages get their own standalone Accuracy/Macro-F1 report from the
+    training script (see mambaTimeSeriesSeqClassificationGMATThrusts.py's '... Standalone
+    Validation' prints, added for every backbone family including classic-ML/GBDT). Logs from
+    before that print existed won't have a standalone Stage 2 report, so this falls back to the
+    accuracy conditioned on Stage 1 detecting correctly and the macro-F1 Stage 2 reached on its
+    own 3-class validation split during training."""
+    empty_sf = pd.DataFrame(columns=["model", "accuracy", "macro_f1"])
     stage1 = eval_df[eval_df["eval_stage"] == "cascade_stage1_standalone"][["model", "accuracy", "macro_f1"]] \
-        if not eval_df.empty else pd.DataFrame(columns=["model", "accuracy", "macro_f1"])
+        if not eval_df.empty else empty_sf.copy()
     stage1 = stage1.sort_values("accuracy", ascending=False)
 
+    stage2_standalone = eval_df[eval_df["eval_stage"] == "cascade_stage2_standalone"][["model", "accuracy", "macro_f1"]] \
+        if not eval_df.empty else empty_sf.copy()
     end2end = eval_df[eval_df["eval_stage"] == "cascade_end_to_end"][["model", "stage2_conditional_accuracy"]] \
         if not eval_df.empty else pd.DataFrame(columns=["model", "stage2_conditional_accuracy"])
-    stage2_f1 = run_df[(run_df["component"] == "Stage2") & (run_df["approach"] == "cascade")][["model", "max_event_f1"]] \
+    stage2_train_f1 = run_df[(run_df["component"] == "Stage2") & (run_df["approach"] == "cascade")][["model", "max_event_f1"]] \
         if not run_df.empty else pd.DataFrame(columns=["model", "max_event_f1"])
-    stage2 = end2end.merge(stage2_f1, on="model", how="outer")
-    stage2 = stage2.sort_values("stage2_conditional_accuracy", ascending=False)
+
+    stage2 = end2end.merge(stage2_standalone, on="model", how="outer").merge(stage2_train_f1, on="model", how="outer")
+    stage2["Accuracy"] = stage2.get("accuracy", pd.Series(dtype=float)).combine_first(
+        stage2.get("stage2_conditional_accuracy", pd.Series(dtype=float)))
+    stage2["Macro_F1"] = stage2.get("macro_f1", pd.Series(dtype=float)).combine_first(
+        stage2.get("max_event_f1", pd.Series(dtype=float)))
+    stage2 = stage2.sort_values("Accuracy", ascending=False)
 
     if stage1.empty and stage2.empty:
         return
@@ -574,10 +604,10 @@ def save_stage_cascade_comparison_plot(eval_df: pd.DataFrame, run_df: pd.DataFra
          "Stage 1 (Detector) -- Standalone Accuracy", "#4C72B0")
     _bar(axes[0, 1], stage1["model"], stage1["macro_f1"], "Macro F1",
          "Stage 1 (Detector) -- Macro F1", "#4C72B0")
-    _bar(axes[1, 0], stage2["model"], stage2["stage2_conditional_accuracy"], "Accuracy (%)",
-         "Stage 2 (Type Classifier) -- Accuracy Given Correct Detection", "#DD8452")
-    _bar(axes[1, 1], stage2["model"], stage2["max_event_f1"], "Macro F1 (own training validation)",
-         "Stage 2 (Type Classifier) -- Standalone Macro F1", "#DD8452")
+    _bar(axes[1, 0], stage2["model"], stage2["Accuracy"], "Accuracy (%)",
+         "Stage 2 (Type Classifier) -- Standalone Accuracy", "#DD8452")
+    _bar(axes[1, 1], stage2["model"], stage2["Macro_F1"], "Macro F1",
+         "Stage 2 (Type Classifier) -- Macro F1", "#DD8452")
 
     fig.suptitle("Cascade Stage 1 vs. Stage 1, and Stage 2 vs. Stage 2, Across Backbones")
     fig.tight_layout()
@@ -639,7 +669,6 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
             ep_df.insert(0, "Model", backbone)
             epoch_frames.append(ep_df)
 
-        sections = find_eval_sections(block)
         inf_m = RE_INFERENCE_TIME.search(block)
         inf_time = float(inf_m.group(1)) if inf_m else float("nan")
 
@@ -648,46 +677,70 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
                 png = cm_dir / f"confmat_{stem}_{backbone}_{tag}.png"
                 save_confusion_matrix(section["confusion_matrix"], section["labels"], png, title)
 
-        if component == "Joint" and sections:
-            ev = eval_summary_from_section(backbone, "Joint", "joint", "joint_4class", sections[0],
-                                            inf_time, log_stem=stem, log_relpath=log_relpath)
-            eval_rows.append(ev.to_flat())
-            _save_cm(sections[0], "joint", f"{backbone} Joint (Acc: {sections[0]['accuracy']:.2f}%)")
+        if component == "Joint":
+            section = _extract_section(block)
+            if section:
+                ev = eval_summary_from_section(backbone, "Joint", "joint", "joint_4class", section,
+                                                inf_time, log_stem=stem, log_relpath=log_relpath)
+                eval_rows.append(ev.to_flat())
+                _save_cm(section, "joint", f"{backbone} Joint (Acc: {section['accuracy']:.2f}%)")
 
-        elif component == "Stage2" and sections:
-            ev1 = eval_summary_from_section(backbone, "Stage1", "cascade", "cascade_stage1_standalone",
-                                             sections[0], float("nan"), log_stem=stem, log_relpath=log_relpath)
-            eval_rows.append(ev1.to_flat())
-            _save_cm(sections[0], "cascade_stage1",
-                     f"{backbone} Cascade Stage1 Detector (Acc: {sections[0]['accuracy']:.2f}%)")
+        elif component == "Stage2":
+            # A Stage 2 block also carries the trailing Cascade Evaluation text (no 'Entering'
+            # marker precedes it). It may hold two or three report quadruples depending on
+            # backbone family/script version, so each is pulled out by its own header rather than
+            # by position -- see find_eval_section_after.
+            stage2_standalone = find_eval_section_after(block, RE_STAGE2_STANDALONE_HDR)
+            stage1_standalone = find_eval_section_after(block, RE_CASCADE_STAGE1_HDR)
+            end_to_end = find_eval_section_after(block, RE_CASCADE_E2E_HDR)
 
-            if len(sections) >= 2:
+            if stage2_standalone:
+                ev0 = eval_summary_from_section(backbone, "Stage2", "cascade", "cascade_stage2_standalone",
+                                                 stage2_standalone, float("nan"),
+                                                 log_stem=stem, log_relpath=log_relpath)
+                eval_rows.append(ev0.to_flat())
+                _save_cm(stage2_standalone, "cascade_stage2",
+                         f"{backbone} Cascade Stage2 Type Classifier (Acc: {stage2_standalone['accuracy']:.2f}%)")
+
+            if stage1_standalone:
+                ev1 = eval_summary_from_section(backbone, "Stage1", "cascade", "cascade_stage1_standalone",
+                                                 stage1_standalone, float("nan"),
+                                                 log_stem=stem, log_relpath=log_relpath)
+                eval_rows.append(ev1.to_flat())
+                _save_cm(stage1_standalone, "cascade_stage1",
+                         f"{backbone} Cascade Stage1 Detector (Acc: {stage1_standalone['accuracy']:.2f}%)")
+
+            if end_to_end:
                 m_cond = RE_STAGE2_COND_ACC.search(block)
                 m_s1only = RE_STAGE1_ONLY_ACC.search(block)
                 stage2_cond_acc = float(m_cond.group(1)) if m_cond else float("nan")
                 stage2_cond_frames = int(m_cond.group(2)) if m_cond else None
                 stage1_only_acc = float(m_s1only.group(1)) if m_s1only else float("nan")
                 ev2 = eval_summary_from_section(backbone, "Cascade", "cascade", "cascade_end_to_end",
-                                                 sections[1], inf_time,
+                                                 end_to_end, inf_time,
                                                  stage1_only_accuracy=stage1_only_acc,
                                                  stage2_conditional_accuracy=stage2_cond_acc,
                                                  stage2_conditional_frames=stage2_cond_frames,
                                                  log_stem=stem, log_relpath=log_relpath)
                 eval_rows.append(ev2.to_flat())
-                _save_cm(sections[1], "cascade_end_to_end",
-                         f"{backbone} Cascade End-to-End (Acc: {sections[1]['accuracy']:.2f}%)")
+                _save_cm(end_to_end, "cascade_end_to_end",
+                         f"{backbone} Cascade End-to-End (Acc: {end_to_end['accuracy']:.2f}%)")
 
-        elif component == "Stage1_solo" and sections:
-            ev = eval_summary_from_section(backbone, "Stage1", "stage1_solo", "stage1_solo", sections[0],
-                                            inf_time, log_stem=stem, log_relpath=log_relpath)
-            eval_rows.append(ev.to_flat())
-            _save_cm(sections[0], "stage1_solo", f"{backbone} Stage1 Solo (Acc: {sections[0]['accuracy']:.2f}%)")
+        elif component == "Stage1_solo":
+            section = _extract_section(block)
+            if section:
+                ev = eval_summary_from_section(backbone, "Stage1", "stage1_solo", "stage1_solo", section,
+                                                inf_time, log_stem=stem, log_relpath=log_relpath)
+                eval_rows.append(ev.to_flat())
+                _save_cm(section, "stage1_solo", f"{backbone} Stage1 Solo (Acc: {section['accuracy']:.2f}%)")
 
-        elif component == "Stage2_solo" and sections:
-            ev = eval_summary_from_section(backbone, "Stage2", "stage2_solo", "stage2_solo", sections[0],
-                                            inf_time, log_stem=stem, log_relpath=log_relpath)
-            eval_rows.append(ev.to_flat())
-            _save_cm(sections[0], "stage2_solo", f"{backbone} Stage2 Solo (Acc: {sections[0]['accuracy']:.2f}%)")
+        elif component == "Stage2_solo":
+            section = _extract_section(block)
+            if section:
+                ev = eval_summary_from_section(backbone, "Stage2", "stage2_solo", "stage2_solo", section,
+                                                inf_time, log_stem=stem, log_relpath=log_relpath)
+                eval_rows.append(ev.to_flat())
+                _save_cm(section, "stage2_solo", f"{backbone} Stage2 Solo (Acc: {section['accuracy']:.2f}%)")
 
     run_df = pd.DataFrame(run_rows)
     eval_df = pd.DataFrame(eval_rows)
