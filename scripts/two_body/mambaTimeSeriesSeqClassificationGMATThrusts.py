@@ -69,6 +69,13 @@ parser.add_argument("--extratrees", dest="use_extra_trees", action="store_true",
 parser.add_argument("--pca", type=int, default=None, help="If set, PCA-reduce the Hankel-window features to this many components for the --mlp comparison (default: keep 95%% variance)")
 parser.add_argument("--mlp", dest="use_mlp", action="store_true", help="Enable PCA+MLP per-timestep comparison on Hankel-windowed rows (disabled by default)")
 parser.add_argument("--minirocket", dest="use_minirocket", action="store_true", help="Enable standalone whole-trajectory MiniRocket 4-class comparison, broadcast across timesteps (disabled by default; --mode joint/all only)")
+parser.add_argument("--loss-scheme", type=str, default="effective", choices=["effective", "inverse"],
+                     help="Per-timestep class weighting for CrossEntropy/focal loss. 'effective' (default): "
+                          "class-balanced weights from the effective number of samples (Cui et al. 2019), which "
+                          "scales more gently than raw inverse frequency across the dataset's variable 2:1-99:1 "
+                          "NoThrust imbalance ratios. 'inverse': plain N/count_c weighting (previous default).")
+parser.add_argument("--cb-beta", type=float, default=0.999, help="Beta for --loss-scheme effective (closer to 1 = more aggressive rebalancing of rare classes)")
+parser.add_argument("--focal-gamma", type=float, default=0.0, help="If > 0, use focal loss with this gamma (on top of --loss-scheme class weights) instead of plain weighted CrossEntropy, to focus gradient on hard/misclassified timesteps rather than just rare ones")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(use_mamba=True)
@@ -119,6 +126,9 @@ use_random_forest = args.use_random_forest
 use_extra_trees = args.use_extra_trees
 use_mlp = args.use_mlp
 use_minirocket = args.use_minirocket
+lossScheme = args.loss_scheme
+cbBeta = args.cb_beta
+focalGamma = args.focal_gamma
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -667,7 +677,14 @@ def _default_label_sets(mode, num_classes):
         raise ValueError(f"Unknown mode: {mode}")
 
 
-def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.float32, device="cpu"):
+def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.float32, device="cpu",
+                          scheme="effective", beta=0.999):
+    """scheme='effective': class-balanced weights from the effective number of samples
+    (Cui et al. 2019, 'Class-Balanced Loss Based on Effective Number of Samples'),
+    weight_c ~ (1-beta) / (1 - beta**n_c). Scales more gently than raw inverse frequency as
+    beta -> 1, which matters here since the NoThrust:other ratio swings from ~2:1 to ~99:1
+    across class files/modes -- plain inverse frequency would give the rare classes wildly
+    different weight magnitudes across runs. scheme='inverse': plain N/count_c weighting."""
     counts = torch.zeros(num_classes, dtype=torch.long)
     with torch.no_grad():
         for _, y_joint, y_stage1, y_stage2 in loader:
@@ -675,25 +692,63 @@ def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.fl
             if pad_idx is not None:
                 y = y[y != pad_idx]
             counts += torch.bincount(y, minlength=num_classes)
-    w = counts.sum() / torch.clamp(counts.to(dtype), min=1.0)
+    counts = counts.to(dtype)
+    if scheme == "effective":
+        effective_num = 1.0 - torch.pow(torch.tensor(beta, dtype=dtype), torch.clamp(counts, min=1.0))
+        w = (1.0 - beta) / torch.clamp(effective_num, min=1e-12)
+    elif scheme == "inverse":
+        w = counts.sum() / torch.clamp(counts, min=1.0)
+    else:
+        raise ValueError(f"Unknown loss scheme: {scheme}")
     w = w / w.mean()
     return w.to(device=device, dtype=dtype)
 
 
+class FocalLoss(nn.Module):
+    """Multi-class focal loss (Lin et al. 2017) with per-class weight and ignore_index support,
+    matching nn.CrossEntropyLoss's interface. Down-weights the loss contribution of
+    already-well-classified timesteps -- typically the dominant NoThrust background -- so
+    gradient stays concentrated on hard/ambiguous frames (e.g. thrust onset/offset) rather than
+    on class rarity alone, complementing the --loss-scheme class weights."""
+
+    def __init__(self, gamma=2.0, weight=None, ignore_index=-100):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.ignore_index = ignore_index
+
+    def forward(self, logits, targets):
+        valid = targets != self.ignore_index
+        if not valid.any():
+            return torch.tensor(float('nan'), device=logits.device, dtype=logits.dtype)
+        ce = nn.functional.cross_entropy(logits[valid], targets[valid], weight=self.weight, reduction='none')
+        pt = torch.exp(-ce)
+        return ((1 - pt) ** self.gamma * ce).mean()
+
+
 def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
-                 pad_idx=-100, class_weights=None, schedulerPatience=3, verbose=True):
+                 pad_idx=-100, class_weights=None, schedulerPatience=3, verbose=True,
+                 loss_scheme=None, cb_beta=None, focal_gamma=None):
     model = model.to(device)
     param_dtype = torch.float64
     model = model.double()
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
+    loss_scheme = lossScheme if loss_scheme is None else loss_scheme
+    cb_beta = cbBeta if cb_beta is None else cb_beta
+    focal_gamma = focalGamma if focal_gamma is None else focal_gamma
+
     if class_weights is None:
-        class_weights = _infer_class_weights(train_loader, num_classes, mode, pad_idx, dtype=param_dtype, device=device)
+        class_weights = _infer_class_weights(train_loader, num_classes, mode, pad_idx, dtype=param_dtype,
+                                              device=device, scheme=loss_scheme, beta=cb_beta)
     else:
         class_weights = torch.as_tensor(class_weights, device=device, dtype=param_dtype)
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=pad_idx)
+    if focal_gamma and focal_gamma > 0:
+        criterion = FocalLoss(gamma=focal_gamma, weight=class_weights, ignore_index=pad_idx)
+    else:
+        criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=pad_idx)
     event_labels, all_labels = _default_label_sets(mode, num_classes)
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=schedulerPatience)
