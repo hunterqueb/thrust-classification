@@ -14,5 +14,7 @@ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
     --rf \
     --extratrees \
     --save \
+    --cb-beta 0.5 \
+    --loss-scheme inverse
     # --test vleo \
     # --testSys 1500 \

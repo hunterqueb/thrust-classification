@@ -69,7 +69,7 @@ parser.add_argument("--extratrees", dest="use_extra_trees", action="store_true",
 parser.add_argument("--pca", type=int, default=None, help="If set, PCA-reduce the Hankel-window features to this many components for the --mlp comparison (default: keep 95%% variance)")
 parser.add_argument("--mlp", dest="use_mlp", action="store_true", help="Enable PCA+MLP per-timestep comparison on Hankel-windowed rows (disabled by default)")
 parser.add_argument("--minirocket", dest="use_minirocket", action="store_true", help="Enable standalone whole-trajectory MiniRocket 4-class comparison, broadcast across timesteps (disabled by default; --mode joint/all only)")
-parser.add_argument("--loss-scheme", type=str, default="effective", choices=["effective", "inverse"],
+parser.add_argument("--loss-scheme", type=str, default="inverse", choices=["effective", "inverse"],
                      help="Per-timestep class weighting for CrossEntropy/focal loss. 'effective' (default): "
                           "class-balanced weights from the effective number of samples (Cui et al. 2019), which "
                           "scales more gently than raw inverse frequency across the dataset's variable 2:1-99:1 "
@@ -227,14 +227,6 @@ def _getThrustingTime(npz_dict, class_name, N, T, warn_if_missing=True):
     return np.zeros((N, T, 1))
 
 
-def _forwardFillFromFirstEvent(thrustingTime):
-    """Marks every timestep from the first '1' onward as thrusting -- an impulsive burn
-    permanently alters the orbit, so 'thrust occurred' is treated as true for the remainder of
-    the propagation window, not just the instant of the delta-v. Idempotent if the array already
-    encodes the persisted window rather than just the instant."""
-    return np.maximum.accumulate(thrustingTime, axis=1)
-
-
 def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std):
     if useNoise:
         for c in CLASS_ORDER:
@@ -298,8 +290,6 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel
         states = npz[f"statesArray{class_name}"]
         N, T = states.shape[0], states.shape[1]
         tt = _getThrustingTime(npz, class_name, N, T, warn_if_missing=(class_name != "NoThrust"))
-        if class_name == "ImpBurn":
-            tt = _forwardFillFromFirstEvent(tt)
         states_by_class[class_name] = states
         thrusting_by_class[class_name] = tt
 
@@ -944,9 +934,14 @@ def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, m
     num_classes = len(class_names)
     example_rows = {}
     for c in range(num_classes):
-        rows = np.where((y_true == c).any(axis=1))[0]
+        counts = (y_true == c).sum(axis=1)
+        rows = np.where(counts > 0)[0]
         if rows.size:
-            example_rows[c] = int(rows[0])
+            # row with the MOST timesteps of class c, not just the first row containing any --
+            # background (class 0) appears in nearly every trajectory as padding around the
+            # actual event, so "first row containing any" trivially matches whatever trajectory
+            # happens to be first in eval order, even if it's dominated by a different class.
+            example_rows[c] = int(rows[np.argmax(counts[rows])])
 
     classes_present = sorted(example_rows.keys())
     if not classes_present:
@@ -982,14 +977,23 @@ def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, m
     return save_path
 
 
-def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=True):
+def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=True,
+                               plot_name=None, plot_save_path=None):
     """y_true_joint/y_true_stage1/pred_stage1: [N,T]; pred_stage2: [N,T] in {0,1,2}. Combines
     stage1 (thrust yes/no) and stage2 (Chemical/Electric/Impulsive) predictions into a single
     4-class per-timestep prediction and reports both the combined result and a stage1-vs-stage2
     error decomposition -- so a cascade shortfall is diagnosable as bad detection vs. bad typing.
     Backbone-agnostic: works whether stage1/stage2 came from matching neural models or the mixed
-    MiniRocket-detector + Mamba-type-classifier 'hybrid' backbone."""
+    MiniRocket-detector + Mamba-type-classifier 'hybrid' backbone.
+
+    If plot_name/plot_save_path are given, also saves a seqpred plot of the combined 4-class
+    result against y_true_joint (same per-timestep grid plotSequencePrediction uses for joint
+    models), so cascade predictions are visually comparable to the joint models' plots."""
     final_pred = np.where(pred_stage1 == 0, 0, pred_stage2 + 1)
+
+    if plot_name is not None and plot_save_path is not None:
+        plotSequencePrediction(plot_name, y_true_joint, final_pred, JOINT_CLASS_NAMES, plot_save_path,
+                                mode_label="Cascade")
 
     y_true_joint = y_true_joint.reshape(-1)
     y_true_stage1 = y_true_stage1.reshape(-1)
@@ -1015,11 +1019,13 @@ def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_sta
     return result
 
 
-def runCascadeEvaluation(stage1_model, stage2_model, loader, device, print_report=True):
+def runCascadeEvaluation(stage1_model, stage2_model, loader, device, print_report=True,
+                          plot_name=None, plot_save_path=None):
     """Neural-neural cascade: both stages are per-timestep nn.Modules over the same loader."""
     y_true_joint, y_true_stage1, pred_stage1 = _predictPerTimestepNeural(stage1_model, loader, device)
     _, _, pred_stage2 = _predictPerTimestepNeural(stage2_model, loader, device)
-    return combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=print_report)
+    return combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=print_report,
+                                      plot_name=plot_name, plot_save_path=plot_save_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1142,7 +1148,9 @@ def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data,
     tInf = timer()
     pred_stage1 = predictClassicPerTimestep(clf1, eval_data, hankel_L)
     pred_stage2 = predictClassicPerTimestep(clf2, eval_data, hankel_L)
-    combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True)
+    combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True,
+                               plot_name=name,
+                               plot_save_path=os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_cascade_{logStem}.png"))
     tInf.tocStr(f"{name} Cascade Inference Time")
     return clf1, clf2
 
@@ -1352,7 +1360,9 @@ def runPCAMLPCascade(train_data, train_joint, val_data, val_joint, eval_data, ev
     tInf = timer()
     pred_stage1 = predictPCAMLPPerTimestep(model1, scaler1, pca1, eval_data, hankel_L, device)
     pred_stage2 = predictPCAMLPPerTimestep(model2, scaler2, pca2, eval_data, hankel_L, device)
-    combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True)
+    combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True,
+                               plot_name="PCA+MLP",
+                               plot_save_path=os.path.join(plotLoc, f"seqpred_PCA+MLP_cascade_{logStem}.png"))
     tInf.tocStr("PCA+MLP Cascade Inference Time")
     return model1, model2
 
@@ -1494,7 +1504,9 @@ def main():
                 _, _, pred_stage2 = _predictPerTimestepNeural(model_stage2, eval_loader, device)
 
                 print("\nCombined Per-Timestep Report (stage-1 decision broadcast across each trajectory):")
-                combineCascadePredictions(eval_joint, eval_stage1, pred_stage1_bcast, pred_stage2, print_report=True)
+                combineCascadePredictions(eval_joint, eval_stage1, pred_stage1_bcast, pred_stage2, print_report=True,
+                                           plot_name="HYBRID",
+                                           plot_save_path=os.path.join(plotLoc, f"seqpred_HYBRID_cascade_{logStem}.png"))
                 cascadeInference.tocStr("HYBRID Cascade Inference Time")
 
             continue
@@ -1538,7 +1550,9 @@ def main():
 
             print(f"\n{backbone.upper()} Cascade Evaluation")
             cascadeInference = timer()
-            runCascadeEvaluation(model_stage1, model_stage2, eval_loader, device=device)
+            runCascadeEvaluation(model_stage1, model_stage2, eval_loader, device=device,
+                                  plot_name=backbone.upper(),
+                                  plot_save_path=os.path.join(plotLoc, f"seqpred_{backbone.upper()}_cascade_{logStem}.png"))
             cascadeInference.tocStr(f"{backbone.upper()} Cascade Inference Time")
 
         if run_stage1_solo:
