@@ -22,8 +22,9 @@
 # opt in to per-timestep Transformer / 1D-CNN (InceptionTime) backbones as additional comparisons
 # in the same run. --hybrid opts in to a mixed cascade -- a whole-trajectory MiniRocket stage-1
 # detector ("does this ~30-minute window contain thrust anywhere", broadcast across every
-# timestep of a trajectory) paired with a Mamba stage-2 per-timestep type classifier -- and only
-# participates in cascade/stage-solo modes (no single joint 4-class 'hybrid' model exists).
+# timestep of a trajectory) paired with a CNN (InceptionTime) stage-2 per-timestep type
+# classifier -- and only participates in cascade/stage-solo modes (no single joint 4-class
+# 'hybrid' model exists).
 #
 # Classic ML / GBDT baselines (LightGBM on by default via --no-classic to disable; --xgboost/
 # --catboost/--rf/--extratrees to opt in) and --mlp (PCA+MLP) operate on Hankel-windowed rows
@@ -32,6 +33,15 @@
 # MiniRocket, so per-timestep windowed rows are a natural fit for them. --minirocket adds a
 # standalone whole-trajectory 4-class MiniRocket comparison (broadcast like --hybrid's stage 1,
 # --mode joint/all only) -- MiniRocket itself still only supports whole-series input.
+#
+# Class imbalance: --loss-scheme/--cb-beta/--focal-gamma reweight the loss (see
+# _infer_class_weights); --oversample instead reweights *sampling* -- the neural train_loader
+# (LSTM/Mamba/Transformer/CNN) draws whole training trajectories with replacement, biased toward
+# trajectories containing rarer per-timestep classes (see _computeOversamplingWeights). Whole
+# trajectories, not individual timesteps, are the unit of resampling, since shuffling timesteps
+# within a sequence would break the temporal context these backbones need. The two knobs are
+# independent and can be combined; classic-ML/PCA+MLP/MiniRocket/hybrid-stage-1 train on raw
+# arrays outside train_loader and are unaffected by --oversample.
 #
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
@@ -52,6 +62,12 @@ parser.add_argument("--norm", action='store_true', help="Normalize the semi-majo
 parser.add_argument("--one-pass", dest="one_pass", action='store_true', help="Use one pass learning.")
 parser.add_argument("--save", dest="save_to_log", action="store_true", help="output console printout to log file in the same location as datasets")
 parser.add_argument("--energy", dest="use_energy", action="store_true", help="Use energy as a feature.")
+parser.add_argument("--energyRate", dest="use_energy_rate", action="store_true",
+                     help="Use per-timestep orbital-energy rate of change (finite difference "
+                          "along time) as an additional feature; implies computing energy "
+                          "internally even without --energy. Energy is ~constant under "
+                          "two-body coasting, so its rate is a direct residual signal for "
+                          "thrust occurring.")
 parser.add_argument("--train_ratio", type=float, default=0.7, help="Ratio of data to use for training")
 parser.add_argument("--mode", type=str, default="all", choices=["all", "joint", "cascade", "stage1", "stage2"],
                      help="'joint': single 4-class per-timestep model. 'cascade': binary detector + "
@@ -60,7 +76,7 @@ parser.add_argument("--mode", type=str, default="all", choices=["all", "joint", 
                           "'all' (default): joint and cascade both.")
 parser.add_argument("--transformer", dest="use_transformer", action="store_true", help="Enable per-timestep Transformer model comparison (disabled by default)")
 parser.add_argument("--cnn", dest="use_cnn", action="store_true", help="Enable per-timestep 1D-CNN (InceptionTime) model comparison (disabled by default)")
-parser.add_argument("--hybrid", dest="use_hybrid", action="store_true", help="Enable 'hybrid' cascade comparison: whole-trajectory MiniRocket stage-1 detector + Mamba stage-2 type classifier (disabled by default; cascade/stage-solo modes only, no joint form)")
+parser.add_argument("--hybrid", dest="use_hybrid", action="store_true", help="Enable 'hybrid' cascade comparison: whole-trajectory MiniRocket stage-1 detector + CNN (InceptionTime) stage-2 type classifier (disabled by default; cascade/stage-solo modes only, no joint form)")
 parser.add_argument("--no-classic", dest="use_classic", action="store_false", help="Disable the LightGBM per-timestep classic-ML comparison (enabled by default)")
 parser.add_argument("--xgboost", dest="use_xgboost", action="store_true", help="Enable XGBoost per-timestep classic-ML comparison (disabled by default)")
 parser.add_argument("--catboost", dest="use_catboost", action="store_true", help="Enable CatBoost per-timestep classic-ML comparison (disabled by default)")
@@ -76,6 +92,14 @@ parser.add_argument("--loss-scheme", type=str, default="inverse", choices=["effe
                           "NoThrust imbalance ratios. 'inverse': plain N/count_c weighting (previous default).")
 parser.add_argument("--cb-beta", type=float, default=0.999, help="Beta for --loss-scheme effective (closer to 1 = more aggressive rebalancing of rare classes)")
 parser.add_argument("--focal-gamma", type=float, default=0.0, help="If > 0, use focal loss with this gamma (on top of --loss-scheme class weights) instead of plain weighted CrossEntropy, to focus gradient on hard/misclassified timesteps rather than just rare ones")
+parser.add_argument("--oversample", action="store_true",
+                     help="Random-oversample the neural per-timestep training DataLoader (LSTM/Mamba/Transformer/CNN "
+                          "train_loader; classic-ML/PCA+MLP/MiniRocket/hybrid stage 1 train on raw arrays and are "
+                          "unaffected). Whole training trajectories are resampled with replacement, weighted toward "
+                          "trajectories containing rarer per-timestep classes, since reordering individual timesteps "
+                          "would break the temporal context LSTM/Mamba need. Val/test are never resampled. "
+                          "Complementary to --loss-scheme (both can be combined, or --loss-scheme's effect reduced "
+                          "via --cb-beta if double-compensation is a concern).")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(use_mamba=True)
@@ -85,6 +109,7 @@ parser.set_defaults(norm=False)
 parser.set_defaults(one_pass=False)
 parser.set_defaults(save_to_log=False)
 parser.set_defaults(use_energy=False)
+parser.set_defaults(use_energy_rate=False)
 parser.set_defaults(use_transformer=False)
 parser.set_defaults(use_cnn=False)
 parser.set_defaults(use_hybrid=False)
@@ -113,6 +138,7 @@ useNorm = args.norm
 useOnePass = args.one_pass
 save_to_log = args.save_to_log
 useEnergy = args.use_energy
+useEnergyRate = args.use_energy_rate
 velNoise = args.velNoise
 train_ratio = args.train_ratio
 runMode = args.mode
@@ -129,6 +155,7 @@ use_minirocket = args.use_minirocket
 lossScheme = args.loss_scheme
 cbBeta = args.cb_beta
 focalGamma = args.focal_gamma
+useOversample = args.oversample
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -141,7 +168,7 @@ import pandas as pd
 from torch import nn
 import torch.optim as optim
 from sklearn.metrics import precision_recall_fscore_support, classification_report, confusion_matrix
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 import matplotlib
 matplotlib.use("Agg")  # headless-safe: this script is typically run over SSH / redirected to a log file
 import matplotlib.pyplot as plt
@@ -156,6 +183,8 @@ device = getDevice()
 strAdd = ""
 if useEnergy:
     strAdd = strAdd + "Energy_"
+if useEnergyRate:
+    strAdd = strAdd + "EnergyRate_"
 if useOE:
     strAdd = strAdd + "OE_"
 if useNorm:
@@ -227,7 +256,7 @@ def _getThrustingTime(npz_dict, class_name, N, T, warn_if_missing=True):
     return np.zeros((N, T, 1))
 
 
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std):
+def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std):
     if useNoise:
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
@@ -256,9 +285,15 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, pos_n
                 s[i, :, :] = dim2NonDim6(s[i, :, :])
             states_by_class[c] = s
 
-    if useEnergy:
+    if useEnergy or useEnergyRate:
         from qutils.orbital import orbitalEnergy
         energy_by_class = {}
+        rate_by_class = {}
+        # norming_energy is a single scalar shared across all 4 classes (taken from the first
+        # class processed), recomputed fresh on every _applyTransforms call -- when --test names a
+        # different orbit/system count than --orbit, train and test energy (and energy rate) get
+        # normalized by DIFFERENT scalars, a pre-existing train/test scale inconsistency under
+        # --norm --energy --test <different orbit>, not introduced or fixed here.
         norming_energy = None
         for c in CLASS_ORDER:
             s = states_by_class[c] if oe_by_class is None else oe_by_class[c][:, :, 0:6]
@@ -270,19 +305,30 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, pos_n
                 if norming_energy is None:
                     norming_energy = energy[0, 0, 0]
                 energy[:, :, 0] = energy[:, :, 0] / norming_energy
+            if useEnergyRate:
+                # diff is linear, so computing the rate after normalization above is equivalent to
+                # normalizing a raw-energy rate -- order doesn't change the numeric result. prepend
+                # gives t=0 a rate of exactly 0 (no prior point) in one call.
+                rate_by_class[c] = np.diff(energy, axis=1, prepend=energy[:, :1, :])
             energy_by_class[c] = energy
+
+        extra_channels = {}
+        for c in CLASS_ORDER:
+            parts = ([energy_by_class[c]] if useEnergy else []) + \
+                    ([rate_by_class[c]] if useEnergyRate else [])
+            extra_channels[c] = np.concatenate(parts, axis=2)
 
         if oe_by_class is not None:
             for c in CLASS_ORDER:
-                states_by_class[c] = np.concatenate((oe_by_class[c], energy_by_class[c]), axis=2)
+                states_by_class[c] = np.concatenate((oe_by_class[c], extra_channels[c]), axis=2)
         else:
             for c in CLASS_ORDER:
-                states_by_class[c] = energy_by_class[c]
+                states_by_class[c] = extra_channels[c]
 
     return states_by_class
 
 
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std):
+def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std):
     states_by_class = {}
     thrusting_by_class = {}
     for class_name in CLASS_ORDER:
@@ -297,7 +343,7 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel
     T_per_class = [states_by_class[c].shape[1] for c in CLASS_ORDER]
     assert len(set(T_per_class)) == 1, f"Timestep count mismatch across classes: {dict(zip(CLASS_ORDER, T_per_class))}"
 
-    states_by_class = _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std)
+    states_by_class = _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std)
 
     states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
 
@@ -347,12 +393,26 @@ def _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=None)
     return train_mask, val_mask, test_mask
 
 
+def _computeOversamplingWeights(y_joint, num_classes):
+    """y_joint: [N,T] training-split joint labels -> weights[N] for a WeightedRandomSampler.
+    Random-oversamples whole trajectories (rather than individual timesteps, which would break
+    the temporal context LSTM/Mamba need) by weighting each trajectory toward the rarest
+    per-timestep class it contains: weight_i = max over classes c present in trajectory i of
+    (1 / count_c), so a trajectory touching a rare class (e.g. a single Chemical burst minute) is
+    drawn more often regardless of how much NoThrust background padding surrounds it, while
+    NoThrust-only trajectories keep the baseline weight."""
+    counts = np.bincount(y_joint.reshape(-1), minlength=num_classes).astype(np.float64)
+    inv_freq = counts.sum() / np.clip(counts, 1.0, None)
+    weights = np.array([inv_freq[np.unique(row)].max() for row in y_joint], dtype=np.float64)
+    return weights
+
+
 def prepareInSequenceThrustClassificationDatasets(
     yaml_config, data_config,
     train_ratio=0.7, val_ratio=0.15, test_ratio=0.15,
     pos_noise_std=1e-3, vel_noise_std=1e-3,
     batch_size=16, pad_idx=-100, seed=None,
-    supress_print=False, return_meta=False,
+    supress_print=False, return_meta=False, oversample=False,
 ):
     """Loads all 4 thrust-type classes (Chemical, Electric, ImpBurn, NoThrust) and builds
     per-timestep labels for three views of the same data:
@@ -365,11 +425,17 @@ def prepareInSequenceThrustClassificationDatasets(
     all 4 class files. Per-timestep 'thrustingTime' ground truth is defensively loaded -- a class
     file missing the key degrades to all-background labels with a printed warning rather than
     raising.
+
+    oversample: if True, train_loader draws whole training trajectories with replacement via a
+    WeightedRandomSampler (see _computeOversamplingWeights) instead of a plain shuffle, so
+    trajectories containing rarer per-timestep classes are seen more often each epoch. val_loader
+    and test_loader are never resampled.
     """
     useOE = yaml_config['useOE']
     useNorm = yaml_config['useNorm']
     useNoise = yaml_config['useNoise']
     useEnergy = yaml_config['useEnergy']
+    useEnergyRate = yaml_config['useEnergyRate']
 
     numMinProp = yaml_config['prop_time']
     train_set = yaml_config['orbit']
@@ -385,7 +451,7 @@ def prepareInSequenceThrustClassificationDatasets(
         print(f"Test data location: {dataLoc_test}")
 
     states, y_joint, n_ic_per_class = _load_and_label(
-        dataLoc, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std
+        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std
     )
 
     train_mask, val_mask, test_mask = _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=seed)
@@ -395,7 +461,7 @@ def prepareInSequenceThrustClassificationDatasets(
 
     if test_set != train_set or test_systems != systems:
         states_t, y_joint_t, n_ic_per_class_t = _load_and_label(
-            dataLoc_test, useOE, useNorm, useNoise, useEnergy, pos_noise_std, vel_noise_std
+            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std
         )
         _, _, test_mask_t = _icGroupSplit(n_ic_per_class_t, train_ratio, val_ratio, test_ratio, seed=seed)
         test_data, test_joint = states_t[test_mask_t], y_joint_t[test_mask_t]
@@ -409,16 +475,25 @@ def prepareInSequenceThrustClassificationDatasets(
     if not supress_print:
         print(f"train_data {train_data.shape}  val_data {val_data.shape}  test_data {test_data.shape}")
 
-    def _make_loader(data, yj, y1, y2, shuffle):
+    def _make_loader(data, yj, y1, y2, shuffle, sampler=None):
         ds = TensorDataset(
             torch.from_numpy(data),
             torch.from_numpy(yj).long(),
             torch.from_numpy(y1).long(),
             torch.from_numpy(y2).long(),
         )
+        if sampler is not None:
+            return DataLoader(ds, batch_size=batch_size, sampler=sampler, pin_memory=True)
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
 
-    train_loader = _make_loader(train_data, train_joint, train_stage1, train_stage2, True)
+    train_sampler = None
+    if oversample:
+        weights = _computeOversamplingWeights(train_joint, num_classes=len(JOINT_LABELS))
+        train_sampler = WeightedRandomSampler(torch.from_numpy(weights), num_samples=len(weights), replacement=True)
+        if not supress_print:
+            print(f"Oversampling enabled: train_loader weights range [{weights.min():.3f}, {weights.max():.3f}]")
+
+    train_loader = _make_loader(train_data, train_joint, train_stage1, train_stage2, train_sampler is None, sampler=train_sampler)
     val_loader = _make_loader(val_data, val_joint, val_stage1, val_stage2, False)
     test_loader = _make_loader(test_data, test_joint, test_stage1, test_stage2, False)
 
@@ -606,10 +681,10 @@ def build_model(backbone, num_classes, input_size, hidden_size, num_layers):
 # from the full series it's fit on -- an early windowed-per-timestep version of this backbone
 # chopped each trajectory into many short, heavily-overlapping sub-series, starving the kernels
 # of signal and working against MiniRocket's actual design. Stage 2 (type classifier) is the
-# same Mamba per-timestep model used elsewhere in this script. Consequently 'hybrid' only
-# participates in cascade/stage-solo modes -- there is no single joint 4-class hybrid model, and
-# stage 1's binary decision applies to a whole trajectory ("does this ~30-minute window contain
-# a thrust event anywhere"), not to individual timesteps.
+# same CNN (InceptionTime) per-timestep model used elsewhere in this script. Consequently
+# 'hybrid' only participates in cascade/stage-solo modes -- there is no single joint 4-class
+# hybrid model, and stage 1's binary decision applies to a whole trajectory ("does this
+# ~30-minute window contain a thrust event anywhere"), not to individual timesteps.
 # ---------------------------------------------------------------------------
 def printMiniROCKETSize(model):
     import pickle
@@ -868,6 +943,85 @@ def _reportFromPredictions(y_true, y_pred, class_names, print_report=True):
     return {"accuracy": accuracy, "class_correct": class_correct, "class_total": class_total, "confusion_matrix": cm}
 
 
+def _findSegments(row, c):
+    """Maximal contiguous (start,end) inclusive index runs where row == c."""
+    is_c = (row == c).astype(np.int8)
+    d = np.diff(np.concatenate(([0], is_c, [0])))
+    starts = np.where(d == 1)[0]
+    ends = np.where(d == -1)[0] - 1
+    return list(zip(starts, ends))
+
+
+def _eventLevelReport(y_true_grid, y_pred_grid, class_names, print_report=True,
+                       valid_from=0, granularity_note=None):
+    """y_true_grid/y_pred_grid: [N,T] int arrays in JOINT_LABELS space (index 0 = NoThrust/
+    background). Complements _reportFromPredictions's per-timestep numbers with segment-level
+    precision/recall per nonzero class -- catches cases where per-timestep accuracy looks fine but
+    the model is scattering wrong-class predictions across a trajectory ("flicker"), which
+    per-timestep metrics average away.
+
+    A true/predicted event is a maximal contiguous run of one class along the time axis for one
+    row (_findSegments). Detection is "any overlap" (point-adjust, Xu et al. 2018): a true event
+    counts as recalled if ANY timestep within its span is predicted as that class; a predicted
+    event counts as a false positive only if it has ZERO overlap with any true event of that class
+    in that row.
+
+    valid_from: columns before this index have no real prediction (Hankel-window classic-ML/
+    PCA+MLP grids hardcode the first hankel_L-1 timesteps to background -- see
+    predictClassicPerTimestep/predictPCAMLPPerTimestep). True events entirely before valid_from
+    are excluded from the recall denominator (no real prediction ever had a chance to catch them)
+    rather than scored as automatic misses -- matching how evaluateClassicPerTimestep already
+    drops those frames from the per-timestep metric. Predicted-segment search always covers the
+    full row (the padded prefix is hardcoded to class 0, so it can never contribute a spurious
+    nonzero segment).
+
+    granularity_note: optional caveat printed under the table, for predictions whose "segment" is
+    coarser than genuine per-timestep localization (e.g. MiniRocket/hybrid-stage1's whole-
+    trajectory broadcast, where recall collapses to whole-trajectory detection).
+    """
+    assert -100 not in np.unique(y_true_grid) and -100 not in np.unique(y_pred_grid), \
+        "_eventLevelReport expects JOINT_LABELS-space grids (no pad_idx) -- got a masked/stage2 grid"
+
+    num_classes = len(class_names)
+    rows_out = []
+    for c in range(1, num_classes):  # skip background, same convention as _default_label_sets' event_labels
+        n_true = n_pred = tp_true = tp_pred = 0
+        for i in range(y_true_grid.shape[0]):
+            true_row, pred_row = y_true_grid[i], y_pred_grid[i]
+            for (s, e) in _findSegments(true_row, c):
+                if e < valid_from:
+                    continue  # wholly inside the no-prediction prefix -- exclude, don't penalize
+                n_true += 1
+                if np.any(pred_row[max(s, valid_from):e + 1] == c):
+                    tp_true += 1
+            for (s, e) in _findSegments(pred_row, c):
+                n_pred += 1
+                if np.any(true_row[s:e + 1] == c):
+                    tp_pred += 1
+        recall = tp_true / n_true if n_true else float('nan')
+        precision = tp_pred / n_pred if n_pred else float('nan')
+        rows_out.append((class_names[c], n_true, n_pred, recall, precision))
+
+    if print_report:
+        print("\nEvent-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:")
+        print(f"{'Class':<12}{'TrueEvents':>12}{'PredEvents':>12}{'Recall':>10}{'Precision':>12}")
+        for name, nt, npred, r, p in rows_out:
+            r_str = f"{r*100:.2f}%" if nt else "n/a"
+            p_str = f"{p*100:.2f}%" if npred else "n/a"
+            print(f"{name:<12}{nt:>12}{npred:>12}{r_str:>10}{p_str:>12}")
+        print("Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its "
+              "'any overlap' recall/precision structurally easier to satisfy than Chemical/"
+              "Electric's bounded bursts -- not directly comparable across classes. Also note "
+              "'any overlap' recall alone does not penalize flicker (a correctly-recalled true "
+              "event can still contain stray wrong-class guesses); it's a spurious class's own "
+              "precision that catches that.")
+        if granularity_note:
+            print(f"Note: {granularity_note}")
+
+    return {name: {"true_events": nt, "pred_events": npred, "recall": r, "precision": p}
+            for name, nt, npred, r, p in rows_out}
+
+
 def validateInSequenceClassifier(model, loader, mode, num_classes, device, pad_idx=-100,
                                   class_names=None, print_report=True, return_predictions=False):
     model.eval()
@@ -978,18 +1132,26 @@ def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, m
 
 
 def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=True,
-                               plot_name=None, plot_save_path=None):
+                               plot_name=None, plot_save_path=None, valid_from=0, granularity_note=None):
     """y_true_joint/y_true_stage1/pred_stage1: [N,T]; pred_stage2: [N,T] in {0,1,2}. Combines
     stage1 (thrust yes/no) and stage2 (Chemical/Electric/Impulsive) predictions into a single
     4-class per-timestep prediction and reports both the combined result and a stage1-vs-stage2
     error decomposition -- so a cascade shortfall is diagnosable as bad detection vs. bad typing.
     Backbone-agnostic: works whether stage1/stage2 came from matching neural models or the mixed
-    MiniRocket-detector + Mamba-type-classifier 'hybrid' backbone.
+    MiniRocket-detector + CNN-type-classifier 'hybrid' backbone.
 
     If plot_name/plot_save_path are given, also saves a seqpred plot of the combined 4-class
     result against y_true_joint (same per-timestep grid plotSequencePrediction uses for joint
-    models), so cascade predictions are visually comparable to the joint models' plots."""
+    models), so cascade predictions are visually comparable to the joint models' plots.
+
+    valid_from/granularity_note are forwarded to _eventLevelReport (see there) -- pass
+    valid_from=hankel_L-1 for classic-ML/PCA+MLP cascades (their grids pad the first hankel_L-1
+    timesteps with a hardcoded background prediction) and a granularity_note for whole-trajectory-
+    broadcast stage-1 decisions (MiniRocket/hybrid)."""
     final_pred = np.where(pred_stage1 == 0, 0, pred_stage2 + 1)
+
+    _eventLevelReport(y_true_joint, final_pred, JOINT_CLASS_NAMES,
+                       valid_from=valid_from, granularity_note=granularity_note)
 
     if plot_name is not None and plot_save_path is not None:
         plotSequencePrediction(plot_name, y_true_joint, final_pred, JOINT_CLASS_NAMES, plot_save_path,
@@ -1108,6 +1270,7 @@ def runClassicFamily(name, classifier_ctor, num_classes, mode_name, class_names,
 
     if mode_name == "joint":
         pred_grid = predictClassicPerTimestep(clf, eval_data, hankel_L)
+        _eventLevelReport(eval_labels, pred_grid, class_names, valid_from=hankel_L - 1)
         plotSequencePrediction(name, eval_labels, pred_grid, class_names,
                                 os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_joint_{logStem}.png"),
                                 mode_label="Joint")
@@ -1150,7 +1313,8 @@ def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data,
     pred_stage2 = predictClassicPerTimestep(clf2, eval_data, hankel_L)
     combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True,
                                plot_name=name,
-                               plot_save_path=os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_cascade_{logStem}.png"))
+                               plot_save_path=os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_cascade_{logStem}.png"),
+                               valid_from=hankel_L - 1)
     tInf.tocStr(f"{name} Cascade Inference Time")
     return clf1, clf2
 
@@ -1315,7 +1479,7 @@ def runPCAMLPFamily(mode_name, num_classes, class_names,
                      train_data, train_labels, val_data, val_labels, eval_data, eval_labels,
                      hankel_L, pad_idx, pca_n_components, device, num_epochs):
     print(f"\nEntering PCA+MLP ({mode_name}) Training Loop")
-    X_train, y_train, X_val, y_val, X_eval, y_eval, _, _ = buildPCAHankelFeatures(
+    X_train, y_train, X_val, y_val, X_eval, y_eval, scaler, pca = buildPCAHankelFeatures(
         train_data, train_labels, val_data, val_labels, eval_data, eval_labels,
         hankel_L, pad_idx, pca_n_components,
     )
@@ -1331,6 +1495,11 @@ def runPCAMLPFamily(mode_name, num_classes, class_names,
     tInf = timer()
     evaluateMLPRowWise(model, eval_loader, class_names, device, print_report=True)
     tInf.tocStr(f"PCA+MLP ({mode_name}) Inference Time")
+
+    if mode_name == "joint":
+        pred_grid = predictPCAMLPPerTimestep(model, scaler, pca, eval_data, hankel_L, device)
+        _eventLevelReport(eval_labels, pred_grid, class_names, valid_from=hankel_L - 1)
+
     return model
 
 
@@ -1362,7 +1531,8 @@ def runPCAMLPCascade(train_data, train_joint, val_data, val_joint, eval_data, ev
     pred_stage2 = predictPCAMLPPerTimestep(model2, scaler2, pca2, eval_data, hankel_L, device)
     combineCascadePredictions(eval_joint, eval_stage1, pred_stage1, pred_stage2, print_report=True,
                                plot_name="PCA+MLP",
-                               plot_save_path=os.path.join(plotLoc, f"seqpred_PCA+MLP_cascade_{logStem}.png"))
+                               plot_save_path=os.path.join(plotLoc, f"seqpred_PCA+MLP_cascade_{logStem}.png"),
+                               valid_from=hankel_L - 1)
     tInf.tocStr("PCA+MLP Cascade Inference Time")
     return model1, model2
 
@@ -1400,6 +1570,7 @@ def main():
         'useNorm': useNorm,
         'useNoise': useNoise,
         'useEnergy': useEnergy,
+        'useEnergyRate': useEnergyRate,
         'prop_time': numMinProp,
         'orbit': orbitType,
         'systems': numRandSys,
@@ -1419,7 +1590,7 @@ def main():
         yaml_config, dataConfig,
         train_ratio=train_ratio, val_ratio=val_ratio, test_ratio=test_ratio,
         pos_noise_std=1e3 * velNoise, vel_noise_std=velNoise,
-        batch_size=16,
+        batch_size=16, oversample=useOversample,
     )
 
     input_size = train_data.shape[2]
@@ -1457,12 +1628,13 @@ def main():
 
         if backbone == "hybrid":
             print("[note] HYBRID = whole-trajectory MiniRocket stage-1 detector ('does this "
-                  "~30-minute window contain thrust anywhere') + Mamba stage-2 per-timestep type "
-                  "classifier. No joint 4-class form, so --mode joint is a no-op for this "
-                  "backbone. Stage 1's trajectory-level decision is broadcast across every "
-                  "timestep of a trajectory for the combined per-timestep report below -- a "
-                  "positive trajectory has no further per-timestep background suppression, so "
-                  "stage 2 alone determines which minutes look idle vs. thrusting within it.")
+                  "~30-minute window contain thrust anywhere') + CNN (InceptionTime) stage-2 "
+                  "per-timestep type classifier. No joint 4-class form, so --mode joint is a "
+                  "no-op for this backbone. Stage 1's trajectory-level decision is broadcast "
+                  "across every timestep of a trajectory for the combined per-timestep report "
+                  "below -- a positive trajectory has no further per-timestep background "
+                  "suppression, so stage 2 alone determines which minutes look idle vs. "
+                  "thrusting within it.")
 
             stage1_clf = None
             if run_cascade or run_stage1_solo:
@@ -1473,8 +1645,8 @@ def main():
 
             model_stage2 = None
             if run_cascade or run_stage2_solo:
-                print("\nEntering HYBRID Stage 2 (Mamba Type Classifier) Training Loop")
-                model_stage2 = build_model("mamba", 3, input_size, hidden_size, num_layers)
+                print("\nEntering HYBRID Stage 2 (CNN Type Classifier) Training Loop")
+                model_stage2 = build_model("cnn", 3, input_size, hidden_size, num_layers)
                 train_model(model_stage2, train_loader, val_loader, num_epochs=num_epochs, num_classes=3,
                             mode='stage2', schedulerPatience=schedulerPatience)
                 printModelParmSize(model_stage2)
@@ -1486,7 +1658,7 @@ def main():
                 _reportFromPredictions(true_stage1_traj, pred_stage1_traj, STAGE1_CLASS_NAMES, print_report=True)
 
             if run_stage2_solo:
-                print("\nHYBRID Stage 2 (Mamba) Validation")
+                print("\nHYBRID Stage 2 (CNN) Validation")
                 validateInSequenceClassifier(model_stage2, eval_loader, mode='stage2', num_classes=3, device=device,
                                               class_names=STAGE2_CLASS_NAMES, print_report=True)
 
@@ -1506,7 +1678,12 @@ def main():
                 print("\nCombined Per-Timestep Report (stage-1 decision broadcast across each trajectory):")
                 combineCascadePredictions(eval_joint, eval_stage1, pred_stage1_bcast, pred_stage2, print_report=True,
                                            plot_name="HYBRID",
-                                           plot_save_path=os.path.join(plotLoc, f"seqpred_HYBRID_cascade_{logStem}.png"))
+                                           plot_save_path=os.path.join(plotLoc, f"seqpred_HYBRID_cascade_{logStem}.png"),
+                                           granularity_note="stage-1 (MiniRocket) decision is whole-trajectory, "
+                                                             "broadcast across every timestep -- recall/precision "
+                                                             "on the detection side collapses to whole-trajectory "
+                                                             "detection; only stage-2's CNN typing is genuinely "
+                                                             "per-timestep.")
                 cascadeInference.tocStr("HYBRID Cascade Inference Time")
 
             continue
@@ -1524,6 +1701,7 @@ def main():
             jointInference.tocStr(f"{backbone.upper()} Joint Inference Time")
 
             y_true_grid, _, pred_grid = _predictPerTimestepNeural(model_joint, eval_loader, device)
+            _eventLevelReport(y_true_grid, pred_grid, JOINT_CLASS_NAMES)
             plotSequencePrediction(backbone.upper(), y_true_grid, pred_grid, JOINT_CLASS_NAMES,
                                     os.path.join(plotLoc, f"seqpred_{backbone.upper()}_joint_{logStem}.png"),
                                     mode_label="Joint")
@@ -1672,6 +1850,10 @@ def main():
             T = eval_data.shape[1]
             pred_bcast = np.repeat(pred_traj[:, None], T, axis=1)
             _reportFromPredictions(eval_joint.reshape(-1), pred_bcast.reshape(-1), JOINT_CLASS_NAMES, print_report=True)
+            _eventLevelReport(eval_joint, pred_bcast, JOINT_CLASS_NAMES,
+                               granularity_note="whole-trajectory MiniRocket decision broadcast across "
+                                                 "every timestep -- recall here is whole-trajectory "
+                                                 "detection, not per-event localization.")
             mrInf.tocStr("MiniRocket Joint Inference Time")
         else:
             print("[note] MINIROCKET only supports --mode joint/all (whole-trajectory 4-class "

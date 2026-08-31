@@ -59,11 +59,32 @@ Key pieces:
 - `--OE`/`--noise`/`--norm`/`--energy` transforms mirror the whole-trajectory script's semantics
   exactly (see `_applyTransforms`), including the slightly quirky `--energy`-alone-vs-with-`--OE`
   channel-count behavior (1 channel vs. 8 = 7 OE + energy) ported faithfully from the original.
+- `--energyRate` adds per-timestep orbital-energy rate of change (`np.diff` along time, `prepend`
+  giving `t=0` a rate of exactly 0) as an additional feature — physics-informed signal for *when*
+  thrust is occurring, since energy should be ~constant under two-body coasting and shows a
+  residual spike during thrust. It generalizes the existing `--energy`-alone quirk rather than
+  changing it: the "energy-family" channel set (energy and/or rate, whichever flags are set) either
+  *replaces* states (no `--OE`, matching `--energy`-alone's existing behavior) or is *appended*
+  after OE (`--OE` set) — `--energy` alone keeps its exact current 1-channel-replace behavior.
+  `--energyRate` alone (no `--energy`) still computes energy internally, just doesn't include the
+  raw value as a channel. Inherits a pre-existing, out-of-scope caveat: `norming_energy` is a
+  scalar recomputed fresh per `_applyTransforms` call, so `--norm --energy --test <different orbit>`
+  normalizes train/test by different scalars.
 
 ## Two approaches, compared side by side
 
 - **Joint**: one model, `num_classes=4`, straight `CrossEntropyLoss` with inverse-frequency class
   weights (`_infer_class_weights`).
+- **Class imbalance, two independent knobs**: `--loss-scheme`/`--cb-beta`/`--focal-gamma` reweight
+  the *loss* (`_infer_class_weights`, `FocalLoss`). `--oversample` instead reweights *sampling*:
+  the neural `train_loader` draws whole training trajectories with replacement via a
+  `WeightedRandomSampler`, biased toward trajectories containing rarer per-timestep classes
+  (`_computeOversamplingWeights` — weight = max over classes present in a trajectory of
+  `1/count_c`). Trajectories, not individual timesteps, are the resampling unit, since shuffling
+  timesteps within a sequence would break the temporal context LSTM/Mamba need. Val/test are never
+  resampled, and classic-ML/PCA+MLP/MiniRocket/hybrid-stage-1 train on raw arrays outside
+  `train_loader`, so `--oversample` only affects the per-timestep neural backbones. The two knobs
+  can be combined.
 - **Cascade**: stage 1 (`num_classes=2`) and stage 2 (`num_classes=3`, trained only on thrusting
   frames via `pad_idx` masking) are separate models. `combineCascadePredictions` combines them at
   inference (`final = 0 if stage1==0 else stage2+1`) and reports the combined result through the
@@ -74,6 +95,31 @@ Key pieces:
 `_reportFromPredictions` is the single formatting/metrics path every model family (neural,
 classic-ML) reports through — this is what makes cross-approach comparison trustworthy rather than
 approximate.
+
+**Event-level (segment) metrics, a second, complementary report.** Per-timestep accuracy can look
+fine while a model still "flickers" between wrong classes across a trajectory (e.g. predicting
+Chemical at one timestep and Electric at another within a trajectory that's truly all-one-type) —
+per-timestep metrics average this away. `_eventLevelReport` reports segment-level precision/recall
+per class instead: a true/predicted event is a maximal contiguous run of one class along the time
+axis, and detection is "any overlap" (point-adjust, Xu et al. 2018) — a true event is recalled if
+any timestep in its span is predicted correctly; a predicted event is a false positive only if it
+has zero overlap with any true event of that class. Two caveats worth remembering when reading the
+table: Impulsive's forward-filled label (burn instant → end of window) makes its numbers
+structurally easier to satisfy than Chemical/Electric's bounded bursts, so it isn't directly
+comparable across classes; and "any overlap" recall alone doesn't penalize flicker by itself — a
+spurious class's own *precision* is what catches that.
+
+Wired into every **joint** and **cascade** evaluation across every model family (LSTM/Mamba/
+Transformer/CNN, classic-ML/GBDT, PCA+MLP, standalone MiniRocket, hybrid) via
+`combineCascadePredictions` (cascade) plus one hook per family's standalone joint path. Two params
+handle family-specific quirks: `valid_from` (classic-ML/PCA+MLP grids hardcode the first
+`hankel_L-1` timesteps to background — see `predictClassicPerTimestep`/`predictPCAMLPPerTimestep`
+— so true events entirely inside that prefix are excluded from the recall denominator rather than
+scored as automatic misses) and `granularity_note` (MiniRocket/hybrid-stage1's whole-trajectory
+broadcast means every predicted "event" spans the entire row, so recall there collapses to
+whole-trajectory detection, not genuine localization — a note is printed alongside those tables to
+flag it). **Not** wired into `--mode stage1`/`stage2` standalone solo modes for any family — those
+diagnostic paths keep per-timestep-only reporting.
 
 ## Backbones
 
@@ -92,10 +138,12 @@ serve every architecture without per-model branching.
 
 Both run always by default (`--no-lstm`/`--no-mamba` opt out); Transformer/CNN/Hybrid are opt-in.
 
-### Hybrid: whole-trajectory MiniRocket + Mamba (important design lesson)
+### Hybrid: whole-trajectory MiniRocket + CNN (important design lesson)
 
-`--hybrid` pairs a **whole-trajectory** MiniRocket stage-1 detector with the standard per-timestep
-Mamba stage 2. This went through a design revision worth recording:
+`--hybrid` pairs a **whole-trajectory** MiniRocket stage-1 detector with a per-timestep CNN
+(InceptionTime) stage 2 (stage 2's backbone is hardcoded to `"cnn"` in `build_model(...)` for this
+combination, independent of `--cnn`/`--no-mamba`). This went through a design revision worth
+recording:
 
 The first implementation windowed MiniRocket (a trailing ~10-step context per timestep, like the
 GBDT baselines below). This was wrong. **MiniRocket's PPV (proportion-of-positive-values) pooling
@@ -171,6 +219,7 @@ final mean-pool over time.
 --orbit STR                training orbit (default vleo)
 --test STR / --testSys N   OOD test orbit / system count (defaults to --orbit / --systems)
 --OE / --noise / --norm / --energy   same semantics as the whole-trajectory script
+--energyRate                  additional per-timestep energy-rate-of-change feature
 --velNoise F                velocity noise std (default 1e-3)
 --train_ratio F              (default 0.7; val/test split from the remainder)
 --one-pass                    1 epoch, for smoke tests
@@ -179,7 +228,7 @@ final mean-pool over time.
 
 --no-lstm / --no-mamba        disable the always-on backbones
 --transformer / --cnn         opt-in per-timestep backbones
---hybrid                      opt-in mixed cascade: whole-trajectory MiniRocket stage 1 + Mamba stage 2
+--hybrid                      opt-in mixed cascade: whole-trajectory MiniRocket stage 1 + CNN stage 2
 
 --no-classic                  disable LightGBM (on by default)
 --xgboost / --catboost / --rf / --extratrees   opt-in GBDT/RF baselines (Hankel-windowed rows)
@@ -193,7 +242,7 @@ Built as 4 phases, each independently runnable and smoke-tested with `--one-pass
 
 - **Phase A** (done): data pipeline, LSTM/Mamba backbones, joint-vs-cascade comparison,
   `train_model`/`validateInSequenceClassifier`/`combineCascadePredictions` infra.
-- **Phase B** (done): Transformer/CNN backbones, later revised Hybrid backbone (MiniRocket+Mamba).
+- **Phase B** (done): Transformer/CNN backbones, later revised Hybrid backbone (MiniRocket+CNN).
 - **Phase C** (done): classic ML/GBDT + PCA+MLP + standalone MiniRocket baselines.
 - **Phase D** (not started): SHAP analysis and Mamba superweight/super-activation analysis.
   Superweight is expected to be low-risk (operates on Mamba's internal weights, independent of the
