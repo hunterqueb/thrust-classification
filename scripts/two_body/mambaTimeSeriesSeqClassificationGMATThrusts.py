@@ -855,12 +855,27 @@ class FocalLoss(nn.Module):
 
 def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
                  pad_idx=-100, class_weights=None, schedulerPatience=3, verbose=True,
-                 loss_scheme=None, cb_beta=None, focal_gamma=None):
+                 loss_scheme=None, cb_beta=None, focal_gamma=None, restore_best=True, lr=1e-3,
+                 restore_metric="loss"):
+    """restore_best: on return, load back the weights from the epoch with the lowest validation
+    loss instead of leaving the model at its final epoch. Early stopping already tracks that
+    epoch; without the restore, training continues for ESpatience epochs past the optimum and the
+    caller evaluates whatever state it drifted into. That biases any comparison across capacity or
+    learning rate specifically, since larger models and higher learning rates overfit furthest in
+    those trailing epochs -- exactly the configurations such a comparison exists to measure.
+    Pass False to reproduce the previous last-epoch behaviour.
+
+    restore_metric: which validation signal defines "best", for both the restore and the
+    early-stopping counter. 'loss' (default) keeps existing behaviour. 'event_f1' tracks event
+    macro-F1 instead, and is what any caller ranking models by F1 should use -- under this
+    dataset's imbalance the two do not coincide, and checkpointing on loss measurably selects the
+    worse-F1 model (0.4448 last-epoch vs 0.4096 best-loss on one leo/30min LSTM fit). Track the
+    metric you are actually selecting on."""
     model = model.to(device)
     param_dtype = torch.float64
     model = model.double()
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
     loss_scheme = lossScheme if loss_scheme is None else loss_scheme
     cb_beta = cbBeta if cb_beta is None else cb_beta
@@ -881,8 +896,12 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=schedulerPatience)
 
     best_loss = float('inf')
+    # best_score is compared in the direction restore_metric implies: minimized for 'loss',
+    # maximized for 'event_f1'. best_loss stays a pure record of the lowest loss seen, for logging.
+    best_score = float('inf') if restore_metric == "loss" else -float('inf')
     ESpatience = schedulerPatience * 2
     counter = 0
+    best_state, best_epoch = None, -1
 
     timeToTrain = timer()
 
@@ -947,23 +966,44 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
         y_pred = torch.cat(all_preds).numpy() if all_preds else np.array([])
         y_true = torch.cat(all_targets).numpy() if all_targets else np.array([])
 
-        if verbose and len(y_true) > 0:
-            p_ev, r_ev, f_ev, _ = precision_recall_fscore_support(y_true, y_pred, labels=event_labels, average='macro', zero_division=0)
-            print(f"Val Event P(macro {event_labels}): {p_ev:.4f} | R: {r_ev:.4f} | F1: {f_ev:.4f}")
-            p_pc, r_pc, f_pc, _ = precision_recall_fscore_support(y_true, y_pred, labels=all_labels, average=None, zero_division=0)
-            print(f"Per-class P: {p_pc}  R: {r_pc}  F1: {f_pc}")
+        # Event macro-F1 is computed every epoch regardless of verbosity, because restore_metric
+        # ='event_f1' checkpoints on it. y_true/y_pred are already materialized, so this is cheap.
+        val_event_f1 = 0.0
+        if len(y_true) > 0:
+            p_ev, r_ev, val_event_f1, _ = precision_recall_fscore_support(
+                y_true, y_pred, labels=event_labels, average='macro', zero_division=0)
+            if verbose:
+                print(f"Val Event P(macro {event_labels}): {p_ev:.4f} | R: {r_ev:.4f} | F1: {val_event_f1:.4f}")
+                p_pc, r_pc, f_pc, _ = precision_recall_fscore_support(y_true, y_pred, labels=all_labels, average=None, zero_division=0)
+                print(f"Per-class P: {p_pc}  R: {r_pc}  F1: {f_pc}")
         print(f"Val Loss: {avg_val_loss:.4f}")
 
+        # The LR schedule always follows val loss -- it is the smoother signal, and F1 moves in
+        # discrete jumps as argmax decisions flip, which makes it a poor plateau detector.
         scheduler.step(avg_val_loss)
 
-        if avg_val_loss < best_loss:
-            best_loss = avg_val_loss
+        improved = (val_event_f1 > best_score) if restore_metric == "event_f1" \
+            else (avg_val_loss < best_score)
+        if improved:
+            best_score = val_event_f1 if restore_metric == "event_f1" else avg_val_loss
+            best_loss = min(best_loss, avg_val_loss)
             counter = 0
+            if restore_best:
+                # .cpu().clone() so the snapshot survives later in-place parameter updates and
+                # does not pin a second copy of the model in GPU memory.
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                best_epoch = epoch
         else:
             counter += 1
             if counter >= ESpatience:
                 print("Early stopping triggered.")
                 break
+
+    if restore_best and best_state is not None:
+        model.load_state_dict(best_state)
+        if verbose:
+            print(f"Restored best weights from epoch {best_epoch + 1} "
+                  f"(best {restore_metric} {best_score:.4f}, lowest val loss {best_loss:.4f}).")
 
     return timeToTrain.toc()
 
