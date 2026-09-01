@@ -92,6 +92,14 @@ parser.add_argument("--loss-scheme", type=str, default="inverse", choices=["effe
                           "NoThrust imbalance ratios. 'inverse': plain N/count_c weighting (previous default).")
 parser.add_argument("--cb-beta", type=float, default=0.999, help="Beta for --loss-scheme effective (closer to 1 = more aggressive rebalancing of rare classes)")
 parser.add_argument("--focal-gamma", type=float, default=0.0, help="If > 0, use focal loss with this gamma (on top of --loss-scheme class weights) instead of plain weighted CrossEntropy, to focus gradient on hard/misclassified timesteps rather than just rare ones")
+parser.add_argument("--standardize", action="store_true",
+                     help="Z-score every feature channel using TRAIN-split statistics only (val/test "
+                          "are transformed with the train mean/std). Off by default so prior results "
+                          "reproduce, but effectively required with --OE: those channels carry the "
+                          "semi-major axis (~6.7e3 km), the orbital period (~5.5e3 s) and the "
+                          "eccentricity (~1e-5) side by side, and that spread saturates the first "
+                          "layer of every backbone -- training collapses to predicting NoThrust "
+                          "everywhere and event F1 goes to exactly 0.")
 parser.add_argument("--oversample", action="store_true",
                      help="Random-oversample the neural per-timestep training DataLoader (LSTM/Mamba/Transformer/CNN "
                           "train_loader; classic-ML/PCA+MLP/MiniRocket/hybrid stage 1 train on raw arrays and are "
@@ -156,6 +164,7 @@ lossScheme = args.loss_scheme
 cbBeta = args.cb_beta
 focalGamma = args.focal_gamma
 useOversample = args.oversample
+useStandardize = args.standardize
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -261,6 +270,16 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
 
+    # orbitalEnergy() is a Cartesian quantity: it reads Y[:,0:3] as position and Y[:,3:6] as
+    # velocity. --OE overwrites states_by_class with orbital elements below, so snapshot the raw
+    # ECI states first and compute energy from those. Feeding orbital elements to it instead
+    # evaluates 0.5*||(Omega,omega,M0)||^2 - mu/||(a,e,i)||, a quantity that correlates only ~0.25
+    # with true orbital energy and destroys the whole premise of the feature (energy is ~constant
+    # under two-body coasting, so departures from constant are the thrust residual).
+    eci_by_class = None
+    if useOE and (useEnergy or useEnergyRate):
+        eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
+
     oe_by_class = None
     if useOE:
         from qutils.orbital import ECI2OE
@@ -296,7 +315,9 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         # --norm --energy --test <different orbit>, not introduced or fixed here.
         norming_energy = None
         for c in CLASS_ORDER:
-            s = states_by_class[c] if oe_by_class is None else oe_by_class[c][:, :, 0:6]
+            # eci_by_class is set only under --OE; otherwise states_by_class is still Cartesian
+            # (dimensional, or non-dimensionalized by dim2NonDim6 under --norm) and is used as-is.
+            s = states_by_class[c] if eci_by_class is None else eci_by_class[c]
             n_ic, T = s.shape[0], s.shape[1]
             energy = np.zeros((n_ic, T, 1))
             for i in range(n_ic):
@@ -318,12 +339,12 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
                     ([rate_by_class[c]] if useEnergyRate else [])
             extra_channels[c] = np.concatenate(parts, axis=2)
 
-        if oe_by_class is not None:
-            for c in CLASS_ORDER:
-                states_by_class[c] = np.concatenate((oe_by_class[c], extra_channels[c]), axis=2)
-        else:
-            for c in CLASS_ORDER:
-                states_by_class[c] = extra_channels[c]
+        # Energy/energy-rate are ADDITIONAL channels, never a replacement. The previous else-branch
+        # assigned extra_channels directly, so --energy or --energyRate without --OE silently
+        # dropped all six ECI channels and trained on the single energy scalar alone.
+        base = oe_by_class if oe_by_class is not None else states_by_class
+        for c in CLASS_ORDER:
+            states_by_class[c] = np.concatenate((base[c], extra_channels[c]), axis=2)
 
     return states_by_class
 
@@ -407,12 +428,38 @@ def _computeOversamplingWeights(y_joint, num_classes):
     return weights
 
 
+def _standardizeSplits(train_data, val_data, test_data, supress_print=False):
+    """Z-scores each feature channel using TRAIN-split statistics only, applied identically to val
+    and test. Returns (train, val, test, mu, sigma).
+
+    Fitting on train alone is what keeps this from leaking: computing val/test statistics from
+    their own splits would let information about held-out orbits reach the model through the
+    scaling constants. Channels with zero variance in train (a constant feature) are left alone
+    rather than divided by ~0."""
+    C = train_data.shape[2]
+    flat = train_data.reshape(-1, C)
+    mu = flat.mean(axis=0)
+    sigma = flat.std(axis=0)
+    degenerate = sigma < 1e-12
+    sigma = np.where(degenerate, 1.0, sigma)
+
+    if not supress_print:
+        if degenerate.any():
+            print(f"Standardize: channels {np.flatnonzero(degenerate).tolist()} are constant in "
+                  f"train; left unscaled.")
+        print(f"Standardize: per-channel train mean range [{mu.min():.4g}, {mu.max():.4g}], "
+              f"std range [{sigma.min():.4g}, {sigma.max():.4g}] -> all channels z-scored")
+
+    out = tuple((d - mu) / sigma for d in (train_data, val_data, test_data))
+    return out + (mu, sigma)
+
+
 def prepareInSequenceThrustClassificationDatasets(
     yaml_config, data_config,
     train_ratio=0.7, val_ratio=0.15, test_ratio=0.15,
     pos_noise_std=1e-3, vel_noise_std=1e-3,
     batch_size=16, pad_idx=-100, seed=None,
-    supress_print=False, return_meta=False, oversample=False,
+    supress_print=False, return_meta=False, oversample=False, standardize=False,
 ):
     """Loads all 4 thrust-type classes (Chemical, Electric, ImpBurn, NoThrust) and builds
     per-timestep labels for three views of the same data:
@@ -430,6 +477,14 @@ def prepareInSequenceThrustClassificationDatasets(
     WeightedRandomSampler (see _computeOversamplingWeights) instead of a plain shuffle, so
     trajectories containing rarer per-timestep classes are seen more often each epoch. val_loader
     and test_loader are never resampled.
+
+    standardize: if True, z-score every feature channel using TRAIN-split statistics only (val and
+    test are transformed with the train mean/std, never their own). Off by default so existing
+    results stay reproducible, but strongly recommended for any flag combination that leaves
+    channels on wildly different scales -- notably --OE, whose channels span the semi-major axis
+    (~6.7e3 km) and eccentricity (~1e-5) simultaneously, an 8-order-of-magnitude spread that
+    saturates LSTM/Mamba gates on the first layer and collapses training to majority-class
+    prediction. See _standardizeSplits.
     """
     useOE = yaml_config['useOE']
     useNorm = yaml_config['useNorm']
@@ -467,6 +522,13 @@ def prepareInSequenceThrustClassificationDatasets(
         test_data, test_joint = states_t[test_mask_t], y_joint_t[test_mask_t]
     else:
         test_data, test_joint = states[test_mask], y_joint[test_mask]
+
+    # Standardization sits after the split (so statistics come from train only) and before the
+    # loaders/raw arrays are handed out, keeping the neural and classic-ML paths on identical
+    # features -- the Hankel-window baselines consume train_data/val_data/test_data directly.
+    if standardize:
+        train_data, val_data, test_data, _, _ = _standardizeSplits(
+            train_data, val_data, test_data, supress_print=supress_print)
 
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
     val_stage1, val_stage2 = _deriveStage1Stage2(val_joint, pad_idx)
@@ -1590,7 +1652,7 @@ def main():
         yaml_config, dataConfig,
         train_ratio=train_ratio, val_ratio=val_ratio, test_ratio=test_ratio,
         pos_noise_std=1e3 * velNoise, vel_noise_std=velNoise,
-        batch_size=16, oversample=useOversample,
+        batch_size=16, oversample=useOversample, standardize=useStandardize,
     )
 
     input_size = train_data.shape[2]
