@@ -43,6 +43,13 @@
 # independent and can be combined; classic-ML/PCA+MLP/MiniRocket/hybrid-stage-1 train on raw
 # arrays outside train_loader and are unaffected by --oversample.
 #
+# --sinusoids K replaces every feature channel with K dominant sinusoidal components extracted per
+# trajectory via FFT (see _decomposeSinusoids): the channel's K largest-magnitude non-DC frequency
+# bins, each reconstructed as its own real sinusoid signal, ordered by descending magnitude. C
+# channels become C*K -- e.g. raw ECI states (6 channels) with --sinusoids 3 yields 18. Off (0) by
+# default; applied after --OE/--energy/--energyRate (whatever channels those leave behind are what
+# gets decomposed) and before --standardize.
+#
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
 import argparse
@@ -68,6 +75,16 @@ parser.add_argument("--energyRate", dest="use_energy_rate", action="store_true",
                           "internally even without --energy. Energy is ~constant under "
                           "two-body coasting, so its rate is a direct residual signal for "
                           "thrust occurring.")
+parser.add_argument("--sinusoids", type=int, default=0,
+                     help="If > 0, replace each feature channel (ECI/OE, plus --energy/--energyRate "
+                          "channels when enabled) with this many dominant sinusoidal components "
+                          "extracted per trajectory via FFT (see _decomposeSinusoids), expanding C "
+                          "channels into C*<sinusoids>. E.g. raw ECI states (6 channels) with "
+                          "--sinusoids 3 yields 18 input channels: each channel's 3 most dominant "
+                          "(non-DC) frequency components, reconstructed as their own real sinusoid "
+                          "signal and ordered by descending magnitude, so component 0 is that "
+                          "channel's single strongest oscillation for that trajectory, component 1 "
+                          "the next, etc. 0 (default) leaves channels untouched.")
 parser.add_argument("--train_ratio", type=float, default=0.7, help="Ratio of data to use for training")
 parser.add_argument("--mode", type=str, default="all", choices=["all", "joint", "cascade", "stage1", "stage2"],
                      help="'joint': single 4-class per-timestep model. 'cascade': binary detector + "
@@ -147,6 +164,7 @@ useOnePass = args.one_pass
 save_to_log = args.save_to_log
 useEnergy = args.use_energy
 useEnergyRate = args.use_energy_rate
+numSinusoids = args.sinusoids
 velNoise = args.velNoise
 train_ratio = args.train_ratio
 runMode = args.mode
@@ -196,6 +214,8 @@ if useEnergyRate:
     strAdd = strAdd + "EnergyRate_"
 if useOE:
     strAdd = strAdd + "OE_"
+if numSinusoids > 0:
+    strAdd = strAdd + f"Sinusoids{numSinusoids}_"
 if useNorm:
     strAdd = strAdd + "Norm_"
 if useNoise:
@@ -265,7 +285,50 @@ def _getThrustingTime(npz_dict, class_name, N, T, warn_if_missing=True):
     return np.zeros((N, T, 1))
 
 
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std):
+def _decomposeSinusoids(states, num_sinusoids):
+    """states: [N,T,C] -> [N,T,C*num_sinusoids]. Every (IC, channel) time series is decomposed
+    independently: an FFT along the time axis picks the `num_sinusoids` frequency bins with the
+    largest magnitude (excluding the DC bin, which is just that channel's mean over the window, not
+    an oscillation), and each selected bin is reconstructed as its own real sinusoid signal
+    A*cos(2*pi*m*t/T + phase) of length T. The K reconstructed component signals REPLACE the single
+    raw channel, so C channels become C*num_sinusoids -- e.g. 6 ECI channels with num_sinusoids=3
+    yields 18, grouped as [chan0_comp0, chan0_comp1, chan0_comp2, chan1_comp0, ...].
+
+    Components are ordered by descending magnitude per (IC, channel), so component 0 is always that
+    trajectory's single most dominant oscillation for that channel, component 1 the next, etc.,
+    regardless of which absolute frequency bin that turns out to be -- the network is fed a stable
+    "1st/2nd/3rd dominant mode" ordering rather than fixed frequency bins that fit some trajectories
+    (e.g. NoThrust, near-periodic) and not others (e.g. a burn mid-window)."""
+    N, T, C = states.shape
+    max_components = T // 2  # non-DC rfft bins: 1..T//2 (T//2+1 bins total incl. DC, and Nyquist if T even)
+    if num_sinusoids > max_components:
+        print(f"[_decomposeSinusoids] WARNING: requested {num_sinusoids} sinusoids but only "
+              f"{max_components} non-DC frequency bins are available for T={T}; clamping.")
+        num_sinusoids = max_components
+
+    freqs = np.fft.rfft(states, axis=1)   # [N, T//2+1, C] complex
+    mag = np.abs(freqs)
+    mag[:, 0, :] = -1.0                   # exclude the DC bin from selection
+
+    order = np.argsort(-mag, axis=1)[:, :num_sinusoids, :]         # [N,K,C] bin indices, descending magnitude
+    amp = np.take_along_axis(mag, order, axis=1)                    # [N,K,C]
+    phase = np.angle(np.take_along_axis(freqs, order, axis=1))      # [N,K,C]
+
+    # A real signal's rfft coefficients need a factor of 2/T to reconstruct amplitude, except the
+    # Nyquist bin (T even only), which has no conjugate partner and needs 1/T.
+    nyquist_bin = T // 2 if T % 2 == 0 else -1
+    scale = np.where(order == nyquist_bin, 1.0, 2.0) / T            # [N,K,C]
+
+    t = np.arange(T).reshape(1, T, 1, 1)
+    m = order.reshape(N, 1, num_sinusoids, C)
+    a = (amp * scale).reshape(N, 1, num_sinusoids, C)
+    p = phase.reshape(N, 1, num_sinusoids, C)
+
+    components = a * np.cos(2 * np.pi * m * t / T + p)              # [N,T,K,C]
+    return components.transpose(0, 1, 3, 2).reshape(N, T, C * num_sinusoids)
+
+
+def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std):
     if useNoise:
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
@@ -346,10 +409,17 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         for c in CLASS_ORDER:
             states_by_class[c] = np.concatenate((base[c], extra_channels[c]), axis=2)
 
+    if numSinusoids > 0:
+        # Decomposes whatever channels the rest of _applyTransforms leaves behind (raw ECI, OE,
+        # and/or the energy/energy-rate channels above) -- runs last so it always sees the final
+        # per-timestep feature set, not the pre-OE/pre-energy Cartesian states.
+        for c in CLASS_ORDER:
+            states_by_class[c] = _decomposeSinusoids(states_by_class[c], numSinusoids)
+
     return states_by_class
 
 
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std):
+def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std):
     states_by_class = {}
     thrusting_by_class = {}
     for class_name in CLASS_ORDER:
@@ -364,7 +434,7 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos
     T_per_class = [states_by_class[c].shape[1] for c in CLASS_ORDER]
     assert len(set(T_per_class)) == 1, f"Timestep count mismatch across classes: {dict(zip(CLASS_ORDER, T_per_class))}"
 
-    states_by_class = _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std)
+    states_by_class = _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std)
 
     states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
 
@@ -485,12 +555,19 @@ def prepareInSequenceThrustClassificationDatasets(
     (~6.7e3 km) and eccentricity (~1e-5) simultaneously, an 8-order-of-magnitude spread that
     saturates LSTM/Mamba gates on the first layer and collapses training to majority-class
     prediction. See _standardizeSplits.
+
+    yaml_config['numSinusoids']: if > 0, replaces every feature channel with this many dominant
+    sinusoidal components extracted per trajectory via FFT (see _decomposeSinusoids), applied as
+    the last step of _applyTransforms -- so it decomposes whatever channels --OE/--energy/
+    --energyRate leave behind. C channels become C*numSinusoids (e.g. 6 ECI channels with
+    numSinusoids=3 yields 18), and standardize (if also on) fits on those expanded channels.
     """
     useOE = yaml_config['useOE']
     useNorm = yaml_config['useNorm']
     useNoise = yaml_config['useNoise']
     useEnergy = yaml_config['useEnergy']
     useEnergyRate = yaml_config['useEnergyRate']
+    numSinusoids = yaml_config['numSinusoids']
 
     numMinProp = yaml_config['prop_time']
     train_set = yaml_config['orbit']
@@ -506,7 +583,7 @@ def prepareInSequenceThrustClassificationDatasets(
         print(f"Test data location: {dataLoc_test}")
 
     states, y_joint, n_ic_per_class = _load_and_label(
-        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std
+        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std
     )
 
     train_mask, val_mask, test_mask = _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=seed)
@@ -516,7 +593,7 @@ def prepareInSequenceThrustClassificationDatasets(
 
     if test_set != train_set or test_systems != systems:
         states_t, y_joint_t, n_ic_per_class_t = _load_and_label(
-            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, pos_noise_std, vel_noise_std
+            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std
         )
         _, _, test_mask_t = _icGroupSplit(n_ic_per_class_t, train_ratio, val_ratio, test_ratio, seed=seed)
         test_data, test_joint = states_t[test_mask_t], y_joint_t[test_mask_t]
@@ -1673,6 +1750,7 @@ def main():
         'useNoise': useNoise,
         'useEnergy': useEnergy,
         'useEnergyRate': useEnergyRate,
+        'numSinusoids': numSinusoids,
         'prop_time': numMinProp,
         'orbit': orbitType,
         'systems': numRandSys,
