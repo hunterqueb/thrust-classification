@@ -50,6 +50,22 @@
 # default; applied after --OE/--energy/--energyRate (whatever channels those leave behind are what
 # gets decomposed) and before --standardize.
 #
+# --physics-loss-weight W (see _computePhysicsResidualTensors, physicsConsistencyLoss) adds
+# auxiliary loss term(s) that nudge the model's EXISTING logits toward physics-derived
+# pseudo-targets built from J2/J3-J6 zonal-harmonic gravity perturbations -- no new head/params.
+# Two terms: 'chem_elec' (--mode joint/stage2) nudges the Chemical-vs-Electric logit margin,
+# since Chemical thrust accelerations are typically on the order of LEO's J2 perturbation and
+# Electric on the order of the much smaller combined J3-J6 perturbation; 'detect' (--mode
+# joint/stage1) nudges the Thrust-vs-NoThrust logit margin toward whether the residual clearly
+# exceeds the J3-J6 floor, targeting the NoThrust-vs-Electric confusion specifically (Electric
+# sits near that floor; Chemical is large and easy either way). In a cascade run, stage 1 gets
+# only 'detect' and stage 2 only 'chem_elec'; a joint model gets both. Both magnitude coincidences
+# are LEO-specific (J2/J3-J6 fall off steeply with altitude while thruster accel does not, so at
+# GEO both thrust types vastly exceed all zonal harmonics) -- to stay orbit-regime-agnostic,
+# J2/J3-J6 accelerations are normalized by local two-body gravity (mu/r^2) into dimensionless
+# ratios that gate each term's per-timestep weight, large in LEO and naturally collapsing toward 0
+# in GEO, with no regime-specific branching in the code. Off (0.0) by default.
+#
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
 import argparse
@@ -125,6 +141,28 @@ parser.add_argument("--oversample", action="store_true",
                           "would break the temporal context LSTM/Mamba need. Val/test are never resampled. "
                           "Complementary to --loss-scheme (both can be combined, or --loss-scheme's effect reduced "
                           "via --cb-beta if double-compensation is a concern).")
+parser.add_argument("--physics-loss-weight", type=float, default=0.0, dest="physics_loss_weight",
+                     help="If > 0, adds auxiliary physics-consistency loss term(s) on top of the existing CE/focal "
+                          "loss (no-op for classic-ML/PCA+MLP/MiniRocket/hybrid, which don't go through train_model "
+                          "at all). Two terms, each reusing the model's EXISTING logits as a binary prediction (no "
+                          "new head/parameters), added depending on --mode: "
+                          "(1) 'chem_elec' (--mode joint/stage2): Chemical-vs-Electric logit margin trained toward "
+                          "whether the per-timestep energy-rate-derived thrust-accel-scale estimate looks closer "
+                          "(in log-space) to the analytic J2 zonal-harmonic acceleration scale (Chemical-like) or "
+                          "the combined J3-J6 scale (Electric-like); gated to Chemical/Electric-labeled frames. "
+                          "(2) 'detect' (--mode joint/stage1): Thrust-vs-NoThrust logit margin trained toward "
+                          "whether that same residual estimate clearly exceeds the J3-J6 scale (the smallest "
+                          "analytically known perturbation floor) -- targets the NoThrust-vs-Electric confusion "
+                          "specifically, since Electric sits near that floor while Chemical is large and easy "
+                          "either way; gated to non-Impulsive frames (Impulsive's forward-filled label would "
+                          "otherwise disagree with the physics floor long after the actual burn). "
+                          "In a cascade run (--mode cascade/stage1/stage2), stage 1 gets ONLY 'detect' and stage 2 "
+                          "gets ONLY 'chem_elec'; a joint 4-class model gets BOTH, since both margins exist in the "
+                          "same softmax. Both terms use BCEWithLogitsLoss, weighted per-timestep by a "
+                          "dimensionless, purely-geometric gate (J2/J3-J6 accel normalized by local two-body "
+                          "gravity) that self-attenuates at high altitude -- where thruster accel dwarfs ALL "
+                          "zonal harmonics and the cue stops being informative -- with no regime-specific "
+                          "branching. 0.0 (default): fully off, no behavior change, no extra compute.")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(use_mamba=True)
@@ -183,6 +221,8 @@ cbBeta = args.cb_beta
 focalGamma = args.focal_gamma
 useOversample = args.oversample
 useStandardize = args.standardize
+physicsLossWeight = args.physics_loss_weight
+usePhysicsLoss = physicsLossWeight > 0
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -228,6 +268,8 @@ if testSet != orbitType:
     strAdd = strAdd + "Test_" + testSet + "_"
 if velNoise != 1e-3:
     strAdd = strAdd + f"VelNoise{velNoise}_"
+if physicsLossWeight > 0:
+    strAdd = strAdd + f"PhysLoss{physicsLossWeight}_"
 
 if strAdd.endswith("_"):
     strAdd = strAdd[:-1]
@@ -328,7 +370,7 @@ def _decomposeSinusoids(states, num_sinusoids):
     return components.transpose(0, 1, 3, 2).reshape(N, T, C * num_sinusoids)
 
 
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std):
+def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False):
     if useNoise:
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
@@ -342,6 +384,14 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
     eci_by_class = None
     if useOE and (useEnergy or useEnergyRate):
         eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
+
+    # Physics-loss inputs (--physics-loss-weight) need raw dimensional (km, km/s) ECI Cartesian
+    # state regardless of what --OE/--norm do to states_by_class below -- unlike eci_by_class
+    # above, this snapshot is taken unconditionally (not gated on useOE) so it stays correct even
+    # under --norm alone.
+    phys_eci_by_class = None
+    if usePhysicsLoss:
+        phys_eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
 
     oe_by_class = None
     if useOE:
@@ -416,10 +466,48 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         for c in CLASS_ORDER:
             states_by_class[c] = _decomposeSinusoids(states_by_class[c], numSinusoids)
 
-    return states_by_class
+    return states_by_class, phys_eci_by_class
 
 
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std):
+PHYS_LOSS_DT_SECONDS = 60.0  # GMAT generation scripts' fixed propagation step (see
+                              # gmat/scripts/generateSpacecraftThrusts.py / generateSpacecraftEThrusts.py: dt = 60.0)
+
+
+def _computePhysicsResidualTensors(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
+    """eci_states: [N,T,6] raw ECI Cartesian (km, km/s), pre-OE/pre-norm (see phys_eci_by_class in
+    _applyTransforms). Returns (h2, h36, g0, residual_accel), each [N,T]:
+      g0             = mu/|r|^2          two-body gravitational accel magnitude (km/s^2)
+      h2             = j2AccelMag(r)/g0  dimensionless J2-to-two-body ratio (orbit-invariant
+                                          formula; VALUE naturally shrinks with altitude)
+      h36            = j3to6AccelMag(r)/g0  dimensionless combined-J3-J6-to-two-body ratio
+      residual_accel = |dE/dt| / |v|     thrust-accel-scale estimate: dE/dt is the same
+                       finite-difference orbital-energy residual --energyRate already uses,
+                       divided by the real sample interval (not left as a raw per-index delta,
+                       since this pathway compares against absolute physical accelerations) and
+                       converted power->accel via /|v|.
+
+    mu is fixed to qutils.orbital.MU_EARTH_JGM2 throughout (energy, g0, h2, h36) for internal
+    self-consistency of the log-ratio comparison in _load_and_label -- deliberately NOT reusing
+    orbitalEnergy's own historical default mu=396800, which stays untouched for the pre-existing
+    --energy/--energyRate feature computed elsewhere in _applyTransforms.
+    """
+    from qutils.orbital import MU_EARTH_JGM2, twoBodyAccel, j2AccelMag, j3to6AccelMag
+
+    r = eci_states[..., 0:3]                                          # [N,T,3]
+    v_mag = np.linalg.norm(eci_states[..., 3:6], axis=-1)             # [N,T]
+    r_mag = np.linalg.norm(r, axis=-1)                                # [N,T]
+
+    energy = 0.5 * v_mag**2 - MU_EARTH_JGM2 / r_mag                   # [N,T]
+    energy_rate = np.diff(energy, axis=1, prepend=energy[:, :1]) / dt_seconds
+    residual_accel = np.abs(energy_rate) / np.maximum(v_mag, 1e-9)    # [N,T], km/s^2
+
+    g0 = twoBodyAccel(r, mu=MU_EARTH_JGM2)
+    h2 = j2AccelMag(r, mu=MU_EARTH_JGM2) / g0
+    h36 = j3to6AccelMag(r, mu=MU_EARTH_JGM2) / g0
+    return h2, h36, g0, residual_accel
+
+
+def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False):
     states_by_class = {}
     thrusting_by_class = {}
     for class_name in CLASS_ORDER:
@@ -434,14 +522,73 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, num
     T_per_class = [states_by_class[c].shape[1] for c in CLASS_ORDER]
     assert len(set(T_per_class)) == 1, f"Timestep count mismatch across classes: {dict(zip(CLASS_ORDER, T_per_class))}"
 
-    states_by_class = _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std)
+    states_by_class, phys_eci_by_class = _applyTransforms(
+        states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids,
+        pos_noise_std, vel_noise_std, usePhysicsLoss)
 
     states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
 
     joint_labels_list = [thrusting_by_class[c].squeeze(-1).astype(np.int64) * JOINT_LABELS[c] for c in CLASS_ORDER]
     y_joint = np.concatenate(joint_labels_list, axis=0)
 
-    return states_cat, y_joint, n_ic_per_class
+    phys_target_ce, phys_gate_ce, phys_target_s1, phys_gate_s1 = None, None, None, None
+    if usePhysicsLoss:
+        h2_parts, h36_parts, g0_parts, resid_parts = [], [], [], []
+        for c in CLASS_ORDER:
+            h2_c, h36_c, g0_c, resid_c = _computePhysicsResidualTensors(phys_eci_by_class[c])
+            h2_parts.append(h2_c); h36_parts.append(h36_c)
+            g0_parts.append(g0_c); resid_parts.append(resid_c)
+        h2 = np.concatenate(h2_parts, axis=0)
+        h36 = np.concatenate(h36_parts, axis=0)
+        g0 = np.concatenate(g0_parts, axis=0)
+        residual_accel = np.concatenate(resid_parts, axis=0)
+
+        log_resid = np.log(np.maximum(residual_accel, 1e-30))
+        log_aJ2 = np.log(np.maximum(h2 * g0, 1e-30))
+        log_aJ36 = np.log(np.maximum(h36 * g0, 1e-30))
+        # Chemical-vs-Electric term (--mode joint/stage2): physics-only pseudo-target, independent
+        # of the true label -- does the empirical thrust-accel-scale estimate look closer (in
+        # log-space) to the J2 scale (Chemical-like, target=1) or the combined J3-J6 scale
+        # (Electric-like, target=0)?
+        pseudo_target_ce = (np.abs(log_resid - log_aJ2) < np.abs(log_resid - log_aJ36)).astype(np.float32)
+
+        # Only Chemical/Electric-labeled frames get any physics-loss contribution; NoThrust and
+        # Impulsive are gated out entirely (gate=0 there).
+        is_chem_or_elec = (y_joint == JOINT_LABELS["Chemical"]) | (y_joint == JOINT_LABELS["Electric"])
+        gate_ce = np.where(is_chem_or_elec, (h2 + h36).astype(np.float32), 0.0).astype(np.float32)
+
+        if is_chem_or_elec.any():
+            print(f"[physics-loss] chem/elec gate (h2+h36) over {int(is_chem_or_elec.sum())} "
+                  f"Chemical/Electric frames: mean={gate_ce[is_chem_or_elec].mean():.3e}, "
+                  f"max={gate_ce.max():.3e} (naturally shrinks toward 0 at higher altitude -- LEO "
+                  f"~1e-3 vs. GEO several orders of magnitude smaller, since J2/J3-J6 fall off as "
+                  f"~1/r^4..1/r^8)")
+
+        # Thrust-vs-NoThrust detection term (--mode joint/stage1): is the empirical residual
+        # clearly above the smallest analytically known natural perturbation floor (a_J3-J6),
+        # independent of the true label? This is the boundary that's actually hard -- Chemical
+        # bursts are large and easy to flag as thrust either way; Electric sits down near this
+        # floor, which is exactly what makes it easy to confuse with NoThrust.
+        a_J3to6 = h36 * g0
+        pseudo_target_s1 = (residual_accel > a_J3to6).astype(np.float32)
+
+        # Excludes Impulsive-labeled frames: their forward-filled 'thrust' label (burn instant ->
+        # end of window, see _forwardFillFromFirstEvent / Impulsive label semantics in the docs)
+        # stays positive long after the actual delta-v, once the true residual has already
+        # settled back near baseline -- comparing THAT against a physics floor would systematically
+        # disagree with the label for reasons that have nothing to do with detection quality.
+        is_not_impulsive = y_joint != JOINT_LABELS["ImpBurn"]
+        gate_s1 = np.where(is_not_impulsive, h36.astype(np.float32), 0.0).astype(np.float32)
+
+        if is_not_impulsive.any():
+            print(f"[physics-loss] detect gate (h36) over {int(is_not_impulsive.sum())} "
+                  f"non-Impulsive frames: mean={gate_s1[is_not_impulsive].mean():.3e}, "
+                  f"max={gate_s1.max():.3e}")
+
+        phys_target_ce, phys_gate_ce = pseudo_target_ce, gate_ce
+        phys_target_s1, phys_gate_s1 = pseudo_target_s1, gate_s1
+
+    return states_cat, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce, phys_target_s1, phys_gate_s1
 
 
 def _deriveStage1Stage2(y_joint, pad_idx=-100):
@@ -568,6 +715,7 @@ def prepareInSequenceThrustClassificationDatasets(
     useEnergy = yaml_config['useEnergy']
     useEnergyRate = yaml_config['useEnergyRate']
     numSinusoids = yaml_config['numSinusoids']
+    usePhysicsLoss = yaml_config.get('usePhysicsLoss', False)
 
     numMinProp = yaml_config['prop_time']
     train_set = yaml_config['orbit']
@@ -582,23 +730,43 @@ def prepareInSequenceThrustClassificationDatasets(
         print(f"Training data location: {dataLoc}")
         print(f"Test data location: {dataLoc_test}")
 
-    states, y_joint, n_ic_per_class = _load_and_label(
-        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std
+    states, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce, phys_target_s1, phys_gate_s1 = _load_and_label(
+        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
+        usePhysicsLoss
     )
+    if phys_target_ce is None:
+        phys_target_ce = np.zeros_like(y_joint, dtype=np.float32)
+        phys_gate_ce = np.zeros_like(y_joint, dtype=np.float32)
+        phys_target_s1 = np.zeros_like(y_joint, dtype=np.float32)
+        phys_gate_s1 = np.zeros_like(y_joint, dtype=np.float32)
 
     train_mask, val_mask, test_mask = _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=seed)
 
     train_data, train_joint = states[train_mask], y_joint[train_mask]
+    train_phys_target_ce, train_phys_gate_ce = phys_target_ce[train_mask], phys_gate_ce[train_mask]
+    train_phys_target_s1, train_phys_gate_s1 = phys_target_s1[train_mask], phys_gate_s1[train_mask]
     val_data, val_joint = states[val_mask], y_joint[val_mask]
+    val_phys_target_ce, val_phys_gate_ce = phys_target_ce[val_mask], phys_gate_ce[val_mask]
+    val_phys_target_s1, val_phys_gate_s1 = phys_target_s1[val_mask], phys_gate_s1[val_mask]
 
     if test_set != train_set or test_systems != systems:
-        states_t, y_joint_t, n_ic_per_class_t = _load_and_label(
-            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std
+        states_t, y_joint_t, n_ic_per_class_t, phys_target_ce_t, phys_gate_ce_t, phys_target_s1_t, phys_gate_s1_t = _load_and_label(
+            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
+            usePhysicsLoss
         )
+        if phys_target_ce_t is None:
+            phys_target_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
+            phys_gate_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
+            phys_target_s1_t = np.zeros_like(y_joint_t, dtype=np.float32)
+            phys_gate_s1_t = np.zeros_like(y_joint_t, dtype=np.float32)
         _, _, test_mask_t = _icGroupSplit(n_ic_per_class_t, train_ratio, val_ratio, test_ratio, seed=seed)
         test_data, test_joint = states_t[test_mask_t], y_joint_t[test_mask_t]
+        test_phys_target_ce, test_phys_gate_ce = phys_target_ce_t[test_mask_t], phys_gate_ce_t[test_mask_t]
+        test_phys_target_s1, test_phys_gate_s1 = phys_target_s1_t[test_mask_t], phys_gate_s1_t[test_mask_t]
     else:
         test_data, test_joint = states[test_mask], y_joint[test_mask]
+        test_phys_target_ce, test_phys_gate_ce = phys_target_ce[test_mask], phys_gate_ce[test_mask]
+        test_phys_target_s1, test_phys_gate_s1 = phys_target_s1[test_mask], phys_gate_s1[test_mask]
 
     # Standardization sits after the split (so statistics come from train only) and before the
     # loaders/raw arrays are handed out, keeping the neural and classic-ML paths on identical
@@ -614,12 +782,16 @@ def prepareInSequenceThrustClassificationDatasets(
     if not supress_print:
         print(f"train_data {train_data.shape}  val_data {val_data.shape}  test_data {test_data.shape}")
 
-    def _make_loader(data, yj, y1, y2, shuffle, sampler=None):
+    def _make_loader(data, yj, y1, y2, y_pt_ce, y_pg_ce, y_pt_s1, y_pg_s1, shuffle, sampler=None):
         ds = TensorDataset(
             torch.from_numpy(data),
             torch.from_numpy(yj).long(),
             torch.from_numpy(y1).long(),
             torch.from_numpy(y2).long(),
+            torch.from_numpy(y_pt_ce).double(),
+            torch.from_numpy(y_pg_ce).double(),
+            torch.from_numpy(y_pt_s1).double(),
+            torch.from_numpy(y_pg_s1).double(),
         )
         if sampler is not None:
             return DataLoader(ds, batch_size=batch_size, sampler=sampler, pin_memory=True)
@@ -632,9 +804,13 @@ def prepareInSequenceThrustClassificationDatasets(
         if not supress_print:
             print(f"Oversampling enabled: train_loader weights range [{weights.min():.3f}, {weights.max():.3f}]")
 
-    train_loader = _make_loader(train_data, train_joint, train_stage1, train_stage2, train_sampler is None, sampler=train_sampler)
-    val_loader = _make_loader(val_data, val_joint, val_stage1, val_stage2, False)
-    test_loader = _make_loader(test_data, test_joint, test_stage1, test_stage2, False)
+    train_loader = _make_loader(train_data, train_joint, train_stage1, train_stage2,
+                                 train_phys_target_ce, train_phys_gate_ce, train_phys_target_s1, train_phys_gate_s1,
+                                 train_sampler is None, sampler=train_sampler)
+    val_loader = _make_loader(val_data, val_joint, val_stage1, val_stage2,
+                               val_phys_target_ce, val_phys_gate_ce, val_phys_target_s1, val_phys_gate_s1, False)
+    test_loader = _make_loader(test_data, test_joint, test_stage1, test_stage2,
+                                test_phys_target_ce, test_phys_gate_ce, test_phys_target_s1, test_phys_gate_s1, False)
 
     result = (train_loader, val_loader, test_loader,
               train_data, train_joint, val_data, val_joint, test_data, test_joint)
@@ -891,7 +1067,7 @@ def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.fl
     different weight magnitudes across runs. scheme='inverse': plain N/count_c weighting."""
     counts = torch.zeros(num_classes, dtype=torch.long)
     with torch.no_grad():
-        for _, y_joint, y_stage1, y_stage2 in loader:
+        for _, y_joint, y_stage1, y_stage2, _, _, _, _ in loader:
             y = _select_labels(y_joint, y_stage1, y_stage2, mode).reshape(-1).long()
             if pad_idx is not None:
                 y = y[y != pad_idx]
@@ -930,10 +1106,61 @@ class FocalLoss(nn.Module):
         return ((1 - pt) ** self.gamma * ce).mean()
 
 
+def physicsConsistencyLoss(logits, mode, term, y_phys_target, y_phys_gate, eps=1e-8):
+    """logits: [B,T,C]; y_phys_target/y_phys_gate: [B,T] float (see _load_and_label's
+    usePhysicsLoss branch -- gate naturally shrinks toward 0 at high altitude, since h2=a_J2/g0
+    and h36=a_J3-6/g0 fall off steeply with r while thruster accel does not -- see
+    --physics-loss-weight help text / top-of-file docstring).
+
+    Reuses the model's OWN existing logits as a binary prediction (no new head, no new
+    parameters) -- which margin depends on `term`:
+      term='chem_elec' (--mode joint/stage2): Chemical-vs-Electric magnitude-scale consistency.
+        mode='joint':  margin = logits[...,Chemical] - logits[...,Electric]
+        mode='stage2': margin = logits[...,0] - logits[...,1]  (Chemical=0, Electric=1 --
+                        _deriveStage1Stage2)
+      term='detect' (--mode joint/stage1): Thrust-vs-NoThrust detection consistency -- targets
+        the boundary that's actually hard (Electric sits near the natural perturbation floor,
+        easily confused with NoThrust; Chemical is large and easy either way).
+        mode='stage1': margin = logits[...,1] - logits[...,0]  (Thrust=1, NoThrust=0 --
+                        STAGE1_CLASS_NAMES)
+        mode='joint':  margin = logsumexp(logits[...,1:]) - logits[...,0] -- the log-odds of
+                        "any thrust class" vs NoThrust implied by the 4-way softmax.
+                        sigmoid(margin) equals the joint softmax's own marginal P(thrust), so
+                        this is the mathematically exact binary read-out of a 4-way softmax, not
+                        an approximation.
+
+    Trains the chosen margin toward the physics pseudo-target via BCEWithLogitsLoss, weighted
+    per-timestep by y_phys_gate, averaged only over gated frames in the batch. Returns a scalar
+    0.0 (never nan) when a batch has no gated frames, so it can never poison the additive total
+    loss via torch.isnan."""
+    if term == "chem_elec":
+        if mode == "joint":
+            margin = logits[..., JOINT_LABELS["Chemical"]] - logits[..., JOINT_LABELS["Electric"]]
+        elif mode == "stage2":
+            margin = logits[..., 0] - logits[..., 1]   # Chemical=0, Electric=1 -- _deriveStage1Stage2
+        else:
+            raise ValueError(f"physicsConsistencyLoss term='chem_elec' is only defined for mode in ('joint','stage2'), got {mode}")
+    elif term == "detect":
+        if mode == "stage1":
+            margin = logits[..., 1] - logits[..., 0]   # Thrust=1, NoThrust=0 -- STAGE1_CLASS_NAMES
+        elif mode == "joint":
+            margin = torch.logsumexp(logits[..., 1:], dim=-1) - logits[..., 0]
+        else:
+            raise ValueError(f"physicsConsistencyLoss term='detect' is only defined for mode in ('joint','stage1'), got {mode}")
+    else:
+        raise ValueError(f"Unknown physicsConsistencyLoss term: {term}")
+
+    per_timestep = nn.functional.binary_cross_entropy_with_logits(margin, y_phys_target, reduction='none')
+    gate_sum = y_phys_gate.sum()
+    if gate_sum <= eps:
+        return torch.zeros((), device=logits.device, dtype=logits.dtype)
+    return (per_timestep * y_phys_gate).sum() / gate_sum
+
+
 def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
                  pad_idx=-100, class_weights=None, schedulerPatience=3, verbose=True,
-                 loss_scheme=None, cb_beta=None, focal_gamma=None, restore_best=True, lr=1e-3,
-                 restore_metric="loss"):
+                 loss_scheme=None, cb_beta=None, focal_gamma=None, physics_loss_weight=None,
+                 restore_best=True, lr=1e-3, restore_metric="loss"):
     """restore_best: on return, load back the weights from the epoch with the lowest validation
     loss instead of leaving the model at its final epoch. Early stopping already tracks that
     epoch; without the restore, training continues for ESpatience epochs past the optimum and the
@@ -957,6 +1184,7 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
     loss_scheme = lossScheme if loss_scheme is None else loss_scheme
     cb_beta = cbBeta if cb_beta is None else cb_beta
     focal_gamma = focalGamma if focal_gamma is None else focal_gamma
+    physics_loss_weight = physicsLossWeight if physics_loss_weight is None else physics_loss_weight
 
     if class_weights is None:
         class_weights = _infer_class_weights(train_loader, num_classes, mode, pad_idx, dtype=param_dtype,
@@ -982,11 +1210,34 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
 
     timeToTrain = timer()
 
+    # 'chem_elec' (Chemical-vs-Electric magnitude-scale consistency) applies to joint/stage2, where
+    # both classes' logits exist side by side. 'detect' (Thrust-vs-NoThrust consistency, targeting
+    # the NoThrust/Electric confusion specifically) applies to joint/stage1 -- so in a cascade run
+    # (--mode cascade/stage1/stage2), stage 1 gets ONLY the detect term and stage 2 gets ONLY the
+    # chem_elec term, while a joint 4-class model gets BOTH (it has both margins available in the
+    # same softmax).
+    use_physics_ce = bool(physics_loss_weight) and physics_loss_weight > 0 and mode in ("joint", "stage2")
+    use_physics_detect = bool(physics_loss_weight) and physics_loss_weight > 0 and mode in ("joint", "stage1")
+    use_physics_loss = use_physics_ce or use_physics_detect
+
+    def _physicsLossTerms(logits, y_phys_target_ce, y_phys_gate_ce, y_phys_target_s1, y_phys_gate_s1):
+        phys_loss = 0.0
+        if use_physics_ce:
+            y_pt = y_phys_target_ce.to(device, non_blocking=True).to(param_dtype)
+            y_pg = y_phys_gate_ce.to(device, non_blocking=True).to(param_dtype)
+            phys_loss = phys_loss + physicsConsistencyLoss(logits, mode, "chem_elec", y_pt, y_pg)
+        if use_physics_detect:
+            y_pt = y_phys_target_s1.to(device, non_blocking=True).to(param_dtype)
+            y_pg = y_phys_gate_s1.to(device, non_blocking=True).to(param_dtype)
+            phys_loss = phys_loss + physicsConsistencyLoss(logits, mode, "detect", y_pt, y_pg)
+        return phys_loss
+
     for epoch in range(num_epochs):
         model.train()
         total_loss, loss_batches = 0.0, 0
+        total_phys_loss = 0.0
         skipped_train_batches = 0
-        for x, y_joint, y_stage1, y_stage2 in train_loader:
+        for x, y_joint, y_stage1, y_stage2, y_phys_target_ce, y_phys_gate_ce, y_phys_target_s1, y_phys_gate_s1 in train_loader:
             x = x.to(device, non_blocking=True)
             if x.dtype != param_dtype:
                 x = x.to(param_dtype)
@@ -1004,15 +1255,24 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
                 skipped_train_batches += 1
                 continue
 
+            batch_phys_loss = 0.0
+            if use_physics_loss:
+                phys_loss = _physicsLossTerms(logits, y_phys_target_ce, y_phys_gate_ce, y_phys_target_s1, y_phys_gate_s1)
+                loss = loss + physics_loss_weight * phys_loss
+                batch_phys_loss = phys_loss.item()
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            total_phys_loss += batch_phys_loss
             loss_batches += 1
 
         avg_loss = total_loss / max(1, loss_batches)
         if verbose:
             msg = f"Epoch [{epoch+1}/{num_epochs}] Train Loss: {avg_loss:.4f}"
+            if use_physics_loss:
+                msg += f"  (avg physics-loss term: {total_phys_loss / max(1, loss_batches):.4f})"
             if skipped_train_batches:
                 msg += f"  ({skipped_train_batches} batch(es) skipped: no unmasked labels)"
             print(msg)
@@ -1021,7 +1281,7 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
         all_preds, all_targets = [], []
         val_loss, val_loss_batches = 0.0, 0
         with torch.no_grad():
-            for x, y_joint, y_stage1, y_stage2 in val_loader:
+            for x, y_joint, y_stage1, y_stage2, y_phys_target_ce, y_phys_gate_ce, y_phys_target_s1, y_phys_gate_s1 in val_loader:
                 x = x.to(device, non_blocking=True)
                 if x.dtype != param_dtype:
                     x = x.to(param_dtype)
@@ -1030,6 +1290,9 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
                 logits = model(x)
                 B, T, C = logits.shape
                 loss = criterion(logits.reshape(B * T, C), labels.reshape(B * T))
+                if use_physics_loss:
+                    phys_loss = _physicsLossTerms(logits, y_phys_target_ce, y_phys_gate_ce, y_phys_target_s1, y_phys_gate_s1)
+                    loss = loss + physics_loss_weight * phys_loss
                 if not torch.isnan(loss):
                     val_loss += loss.item()
                     val_loss_batches += 1
@@ -1207,7 +1470,7 @@ def validateInSequenceClassifier(model, loader, mode, num_classes, device, pad_i
     param_dtype = torch.float64
     all_preds, all_targets = [], []
     with torch.no_grad():
-        for x, y_joint, y_stage1, y_stage2 in loader:
+        for x, y_joint, y_stage1, y_stage2, _, _, _, _ in loader:
             x = x.to(device, non_blocking=True)
             if x.dtype != param_dtype:
                 x = x.to(param_dtype)
@@ -1240,7 +1503,7 @@ def _predictPerTimestepNeural(model, loader, device):
     param_dtype = torch.float64
     all_pred, all_joint, all_stage1 = [], [], []
     with torch.no_grad():
-        for x, y_joint, y_stage1, y_stage2 in loader:
+        for x, y_joint, y_stage1, y_stage2, _, _, _, _ in loader:
             x = x.to(device, non_blocking=True)
             if x.dtype != param_dtype:
                 x = x.to(param_dtype)
@@ -1751,6 +2014,7 @@ def main():
         'useEnergy': useEnergy,
         'useEnergyRate': useEnergyRate,
         'numSinusoids': numSinusoids,
+        'usePhysicsLoss': usePhysicsLoss,
         'prop_time': numMinProp,
         'orbit': orbitType,
         'systems': numRandSys,

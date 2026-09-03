@@ -296,7 +296,7 @@ Priority order, cheapest/highest-signal first:
       `combined/leo-meo-geo`, `combined/vleo-heo-meo-geo`, etc. (already present under
       `GMAT-Thrust-Data/data/classification/combined/`) work with existing flags today. Run a full
       train-on-combined vs. train-on-single-regime matrix, evaluated cross-regime, to characterize
-      generalization — this doesn't require new code, just systematic invocation.
+      generalization — thisn  yyn doesn't require new code, just systematic invocation.
 - [ ] **`--propMin` sweep** (10/30/100 min variants already exist) crossed against classifier choice —
       quantify where Mamba's advantage over LSTM grows with sequence length, rather than relying on
       single-length anecdotal comparisons.

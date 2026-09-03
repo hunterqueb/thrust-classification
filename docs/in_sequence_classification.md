@@ -71,6 +71,82 @@ Key pieces:
   scalar recomputed fresh per `_applyTransforms` call, so `--norm --energy --test <different orbit>`
   normalizes train/test by different scalars.
 
+## Physics-informed loss (`--physics-loss-weight`)
+
+`--physics-loss-weight W` (default `0.0`, off) adds auxiliary loss term(s) — no new model heads,
+no new parameters — that nudge the model's *existing* logits toward physics-derived pseudo-targets
+built from J2/J3-J6 zonal-harmonic gravity perturbations. Two independent terms, gated on by
+`--mode`:
+
+- **`chem_elec`** (`--mode joint`/`stage2`): Chemical thrust accelerations are typically on the
+  order of LEO's J2 zonal-harmonic gravity perturbation; Electric thrust is typically on the order
+  of the much smaller combined J3-J6 perturbation. Nudges the Chemical-vs-Electric logit margin
+  toward whichever scale the empirical residual looks closer to.
+- **`detect`** (`--mode joint`/`stage1`): targets a different, arguably harder boundary —
+  NoThrust vs. Electric. Electric thrust sits down near the smallest zonal-harmonic scale (J3-J6),
+  which is exactly what makes it easy to confuse with plain coasting; Chemical is large and easy
+  to flag as thrust either way, so it doesn't need this term. Nudges the Thrust-vs-NoThrust logit
+  margin toward whether the residual clearly exceeds the J3-J6 floor.
+
+**In a cascade run** (`--mode cascade`/`stage1`/`stage2`), stage 1 gets *only* `detect` and stage 2
+gets *only* `chem_elec` — each stage's own binary/3-way logits only support one of the two margins.
+**In a joint run**, the single 4-class model gets *both* terms simultaneously, since both margins
+are extractable from the same softmax. `stage1` was initially left out of the mechanism entirely
+(no per-type logits existed to reuse for the original Chemical-vs-Electric idea); `detect` was
+added afterward specifically to close that gap, once it was clear the NoThrust/Electric boundary
+was a more valuable target for a physics prior than Chemical/Electric.
+
+Both magnitude coincidences are LEO-specific: J2/J3-J6 accelerations fall off steeply with altitude
+(J2 ~1/r^4, J3-J6 even faster) while thruster-produced accelerations don't shrink with orbit
+altitude, so at GEO both thrust types vastly exceed every zonal harmonic and the cue disappears.
+To stay orbit-regime-agnostic without any regime-specific branching, the mechanism normalizes
+J2/J3-J6 accelerations by local two-body gravity (`mu/r^2`) into dimensionless ratios `h2`/`h36`
+that are large in LEO and collapse toward zero in GEO by construction, and uses that as a **gate**
+on each term's weight rather than as a hard target:
+
+- **`qutils.orbital`** gains `twoBodyAccel`, `j2AccelMag` (Curtis closed form) and
+  `zonalAccelMag`/`j3to6AccelMag` (general order-0 zonal closed form via the standard Legendre
+  recursion, verified to reduce exactly to the J2 formula at degree 2), with JGM2-consistent
+  coefficients read from the actual `.cof` file the training data's GMAT force model uses.
+- **`_computePhysicsResidualTensors`** (per-timestep, from the raw pre-`--OE`/pre-`--norm` ECI
+  snapshot, same snapshot-before-transform pattern as `--energy`) computes `h2 = a_J2/g0`,
+  `h36 = a_J3-J6/g0`, and an empirical thrust-accel-scale estimate `residual_accel = |dE/dt|/|v|`
+  (the same finite-difference energy residual `--energyRate` uses, but divided by the real 60s
+  sample interval to get a physical km/s^2 estimate).
+- **`_load_and_label`** builds both pseudo-target/gate pairs from those tensors, purely from
+  physics, independent of the true label:
+  - `chem_elec`: compares `residual_accel` against `a_J2`/`a_J3-J6` in log-space (does the residual
+    look closer to the J2 scale, "Chemical-like", or the J3-J6 scale, "Electric-like"?), gated by
+    `h2+h36`, zeroed outside Chemical/Electric-labeled frames (NoThrust/Impulsive get no
+    contribution).
+  - `detect`: `1` if `residual_accel > a_J3-J6` (thrust-like), else `0`, gated by `h36`, zeroed on
+    Impulsive-labeled frames specifically — Impulsive's forward-filled "thrust" label (burn instant
+    → end of window, see "Impulsive label semantics" below) stays positive long after the true
+    residual has settled back to baseline, which would otherwise disagree with the physics floor
+    for reasons that have nothing to do with detection quality.
+  Two `[physics-loss] ... gate ...` diagnostics print the mean/max gate over their respective
+  scoped frames so the regime-attenuation behavior is checkable from logs (confirmed for
+  `chem_elec`: ~1.6e-3 mean at `leo/30min-1500` vs. ~3.9e-5 at `geo/30min-1500`, a ~40x drop with
+  zero regime-specific code).
+- **`physicsConsistencyLoss(logits, mode, term, y_phys_target, y_phys_gate)`** reuses the model's
+  *existing* logits as a binary prediction — which margin depends on `term`/`mode`:
+  `chem_elec`+`joint` → `logits[Chemical]-logits[Electric]`; `chem_elec`+`stage2` →
+  `logits[0]-logits[1]`; `detect`+`stage1` → `logits[Thrust]-logits[NoThrust]`; `detect`+`joint` →
+  `logsumexp(logits[1:]) - logits[NoThrust]`, the log-odds of "any thrust class" vs. NoThrust
+  implied by the 4-way softmax (its sigmoid equals the softmax's own marginal `P(thrust)` exactly,
+  not an approximation). Trained via `BCEWithLogitsLoss`, weighted per-timestep by the gate. Added
+  to the existing CE/focal loss in both the train and val loops of `train_model` (one or both terms
+  summed depending on mode), scaled by `--physics-loss-weight` outside the weighted-mean ratio
+  (folding it into the gate instead would make it cancel out as a constant scale factor and
+  silently no-op the CLI flag).
+- The physics tensors are threaded through the DataLoader as four extra per-timestep float tensors
+  (`y_phys_target_ce`, `y_phys_gate_ce`, `y_phys_target_s1`, `y_phys_gate_s1`), widening every batch
+  from a 4-tuple to an 8-tuple — every loader-consumer in the file (`_infer_class_weights`,
+  `train_model`, `validateInSequenceClassifier`, `_predictPerTimestepNeural`) was updated to unpack
+  eight values, ignoring the last four where unused. `--physics-loss-weight 0.0` keeps these as
+  zero-filled dummy tensors with zero added compute cost — bit-identical behavior to before the
+  flag existed.
+
 ## Two approaches, compared side by side
 
 - **Joint**: one model, `num_classes=4`, straight `CrossEntropyLoss` with inverse-frequency class
@@ -220,6 +296,9 @@ final mean-pool over time.
 --test STR / --testSys N   OOD test orbit / system count (defaults to --orbit / --systems)
 --OE / --noise / --norm / --energy   same semantics as the whole-trajectory script
 --energyRate                  additional per-timestep energy-rate-of-change feature
+--physics-loss-weight F       auxiliary physics-consistency loss term(s): Chemical-vs-Electric
+                               (--mode joint/stage2) and/or NoThrust-vs-Thrust detection
+                               (--mode joint/stage1); see "Physics-informed loss" above
 --velNoise F                velocity noise std (default 1e-3)
 --train_ratio F              (default 0.7; val/test split from the remainder)
 --one-pass                    1 epoch, for smoke tests
