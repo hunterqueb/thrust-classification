@@ -20,8 +20,10 @@ sharing the same data split and reporting code, so the comparison is a number in
 guess. `--mode {all,joint,cascade,stage1,stage2}` controls which paths run.
 
 The motivating argument for the cascade: per-timestep positive rates differ wildly by class —
-Chemical bursts last 1 of 30 minutes (config: `chemThrustMin: 1`), Electric bursts last 10 of 30
-(`elecThrustMin: 10`), and Impulsive is a one-time event whose effect is treated as permanent (see
+Chemical bursts last 6 of 30 minutes (config: `chemThrustMin: 6`), Electric bursts last 24 of 30
+(`elecThrustMin: 24`) — these scale proportionally with `numMinsToProp`, so ~20% chemical and
+~60-80% electric duty cycle at any window — and Impulsive is a one-time event whose effect is
+treated as permanent (see
 "Impulsive label semantics" below). A single joint softmax has to learn all these base rates at
 once, which tends to hurt the rarer classes; splitting into "any thrust?" (pools positives
 together, less imbalanced) then "which type, given thrust is happening?" (a cleaner 3-way
@@ -73,36 +75,35 @@ Key pieces:
 
 ## Physics-informed loss (`--physics-loss-weight`)
 
-`--physics-loss-weight W` (default `0.0`, off) adds auxiliary loss term(s) — no new model heads,
-no new parameters — that nudge the model's *existing* logits toward physics-derived pseudo-targets
-built from J2/J3-J6 zonal-harmonic gravity perturbations. Two independent terms, gated on by
-`--mode`:
+`--physics-loss-weight W` (default `0.0`, off) adds an auxiliary **Chemical-vs-Electric** loss term
+— no new model heads, no new parameters — that nudges the model's *existing* Chemical-vs-Electric
+logit margin toward a physics-derived pseudo-target. Chemical thrust accelerations are typically on
+the order of LEO's J2 zonal-harmonic gravity perturbation; Electric thrust is on the order of the
+much smaller combined J3-J6 perturbation, so which analytic scale the measured residual sits closer
+to is itself evidence of the type. Applies to `--mode joint`/`stage2` (`stage1` has no per-type
+logits, and classic-ML/PCA+MLP/MiniRocket/hybrid don't go through `train_model`).
 
-- **`chem_elec`** (`--mode joint`/`stage2`): Chemical thrust accelerations are typically on the
-  order of LEO's J2 zonal-harmonic gravity perturbation; Electric thrust is typically on the order
-  of the much smaller combined J3-J6 perturbation. Nudges the Chemical-vs-Electric logit margin
-  toward whichever scale the empirical residual looks closer to.
-- **`detect`** (`--mode joint`/`stage1`): targets a different, arguably harder boundary —
-  NoThrust vs. Electric. Electric thrust sits down near the smallest zonal-harmonic scale (J3-J6),
-  which is exactly what makes it easy to confuse with plain coasting; Chemical is large and easy
-  to flag as thrust either way, so it doesn't need this term. Nudges the Thrust-vs-NoThrust logit
-  margin toward whether the residual clearly exceeds the J3-J6 floor.
+Measurement supports this term's premise: Chemical's measured residual is ~3.4×10⁻⁵ km/s², within
+~3× of a_J2 (1.2×10⁻⁵) and ~12× above Electric's (~2.9×10⁻⁶) — a real, separable magnitude gap.
 
-**In a cascade run** (`--mode cascade`/`stage1`/`stage2`), stage 1 gets *only* `detect` and stage 2
-gets *only* `chem_elec` — each stage's own binary/3-way logits only support one of the two margins.
-**In a joint run**, the single 4-class model gets *both* terms simultaneously, since both margins
-are extractable from the same softmax. `stage1` was initially left out of the mechanism entirely
-(no per-type logits existed to reuse for the original Chemical-vs-Electric idea); `detect` was
-added afterward specifically to close that gap, once it was clear the NoThrust/Electric boundary
-was a more valuable target for a physics prior than Chemical/Electric.
+> **A companion `detect` (Thrust-vs-NoThrust) term was built and then removed.** It targeted the
+> NoThrust/Electric boundary via "is `residual_accel` above the J3-J6 floor". `analyzeThrustSeparability.py`
+> measured the quantities it assumed and refuted them: coasting frames already sit at ~2.7×10⁻⁶ km/s²
+> versus a J3-J6 floor of ~3.8×10⁻⁸, so the pseudo-target was true on essentially every frame —
+> it taught the model *"everything is thrust."* Recalibrating the threshold doesn't rescue it,
+> because the underlying per-frame feature has **ROC AUC ≈ 0.52** for Electric-vs-NoThrust (chance):
+> any correctly-calibrated threshold flips the target to 0 on true Electric frames, supervising the
+> model to *miss* Electric. The quantity that does separate them is the **signed, orbit-integrated**
+> energy change (AUC 0.652 over one full orbit), which is trajectory-level and doesn't fit a
+> per-timestep loss. See "Separability analysis" below.
 
-Both magnitude coincidences are LEO-specific: J2/J3-J6 accelerations fall off steeply with altitude
+The magnitude coincidence is LEO-specific: J2/J3-J6 accelerations fall off steeply with altitude
 (J2 ~1/r^4, J3-J6 even faster) while thruster-produced accelerations don't shrink with orbit
 altitude, so at GEO both thrust types vastly exceed every zonal harmonic and the cue disappears.
 To stay orbit-regime-agnostic without any regime-specific branching, the mechanism normalizes
 J2/J3-J6 accelerations by local two-body gravity (`mu/r^2`) into dimensionless ratios `h2`/`h36`
 that are large in LEO and collapse toward zero in GEO by construction, and uses that as a **gate**
-on each term's weight rather than as a hard target:
+on the term's weight rather than as a hard target:
 
 - **`qutils.orbital`** gains `twoBodyAccel`, `j2AccelMag` (Curtis closed form) and
   `zonalAccelMag`/`j3to6AccelMag` (general order-0 zonal closed form via the standard Legendre
@@ -113,39 +114,164 @@ on each term's weight rather than as a hard target:
   `h36 = a_J3-J6/g0`, and an empirical thrust-accel-scale estimate `residual_accel = |dE/dt|/|v|`
   (the same finite-difference energy residual `--energyRate` uses, but divided by the real 60s
   sample interval to get a physical km/s^2 estimate).
-- **`_load_and_label`** builds both pseudo-target/gate pairs from those tensors, purely from
-  physics, independent of the true label:
-  - `chem_elec`: compares `residual_accel` against `a_J2`/`a_J3-J6` in log-space (does the residual
-    look closer to the J2 scale, "Chemical-like", or the J3-J6 scale, "Electric-like"?), gated by
-    `h2+h36`, zeroed outside Chemical/Electric-labeled frames (NoThrust/Impulsive get no
-    contribution).
-  - `detect`: `1` if `residual_accel > a_J3-J6` (thrust-like), else `0`, gated by `h36`, zeroed on
-    Impulsive-labeled frames specifically — Impulsive's forward-filled "thrust" label (burn instant
-    → end of window, see "Impulsive label semantics" below) stays positive long after the true
-    residual has settled back to baseline, which would otherwise disagree with the physics floor
-    for reasons that have nothing to do with detection quality.
-  Two `[physics-loss] ... gate ...` diagnostics print the mean/max gate over their respective
-  scoped frames so the regime-attenuation behavior is checkable from logs (confirmed for
-  `chem_elec`: ~1.6e-3 mean at `leo/30min-1500` vs. ~3.9e-5 at `geo/30min-1500`, a ~40x drop with
-  zero regime-specific code).
-- **`physicsConsistencyLoss(logits, mode, term, y_phys_target, y_phys_gate)`** reuses the model's
-  *existing* logits as a binary prediction — which margin depends on `term`/`mode`:
-  `chem_elec`+`joint` → `logits[Chemical]-logits[Electric]`; `chem_elec`+`stage2` →
-  `logits[0]-logits[1]`; `detect`+`stage1` → `logits[Thrust]-logits[NoThrust]`; `detect`+`joint` →
-  `logsumexp(logits[1:]) - logits[NoThrust]`, the log-odds of "any thrust class" vs. NoThrust
-  implied by the 4-way softmax (its sigmoid equals the softmax's own marginal `P(thrust)` exactly,
-  not an approximation). Trained via `BCEWithLogitsLoss`, weighted per-timestep by the gate. Added
-  to the existing CE/focal loss in both the train and val loops of `train_model` (one or both terms
-  summed depending on mode), scaled by `--physics-loss-weight` outside the weighted-mean ratio
-  (folding it into the gate instead would make it cancel out as a constant scale factor and
-  silently no-op the CLI flag).
-- The physics tensors are threaded through the DataLoader as four extra per-timestep float tensors
-  (`y_phys_target_ce`, `y_phys_gate_ce`, `y_phys_target_s1`, `y_phys_gate_s1`), widening every batch
-  from a 4-tuple to an 8-tuple — every loader-consumer in the file (`_infer_class_weights`,
-  `train_model`, `validateInSequenceClassifier`, `_predictPerTimestepNeural`) was updated to unpack
-  eight values, ignoring the last four where unused. `--physics-loss-weight 0.0` keeps these as
+- **`_load_and_label`** builds the pseudo-target/gate pair from those tensors, purely from physics,
+  independent of the true label: it compares `residual_accel` against `a_J2`/`a_J3-J6` in log-space
+  (does the residual look closer to the J2 scale, "Chemical-like", or the J3-J6 scale,
+  "Electric-like"?), gated by `h2+h36` and zeroed outside Chemical/Electric-labeled frames
+  (NoThrust/Impulsive get no contribution). A `[physics-loss] chem/elec gate ...` diagnostic prints
+  the mean/max gate so the regime-attenuation behavior is checkable from logs (confirmed: ~1.6e-3
+  mean at `leo/30min-1500` vs. ~3.9e-5 at `geo/30min-1500`, a ~40× drop with zero regime-specific
+  code).
+- **`physicsConsistencyLoss(logits, mode, y_phys_target, y_phys_gate)`** reuses the model's
+  *existing* logit margin as a binary prediction — `joint` → `logits[Chemical]-logits[Electric]`;
+  `stage2` → `logits[0]-logits[1]`. Trained via `BCEWithLogitsLoss`, weighted per-timestep by the
+  gate. Added to the existing CE/focal loss in both the train and val loops of `train_model`,
+  scaled by `--physics-loss-weight` outside the weighted-mean ratio (folding it into the gate
+  instead would make it cancel out as a constant scale factor and silently no-op the CLI flag).
+- The physics tensors are threaded through the DataLoader as two extra per-timestep float tensors
+  (`y_phys_target`, `y_phys_gate`), widening every batch from a 4-tuple to a 6-tuple — every
+  loader-consumer in the file (`_infer_class_weights`, `train_model`,
+  `validateInSequenceClassifier`, `_predictPerTimestepNeural`) unpacks
+  six values, ignoring the last two where unused. `--physics-loss-weight 0.0` keeps these as
   zero-filled dummy tensors with zero added compute cost — bit-identical behavior to before the
   flag existed.
+
+## Temporal gap-closing (`--smooth-max-gap`)
+
+A purely post-hoc knob — no retraining, no loss changes, evaluation-time only. A per-timestep
+classifier can detect a long burst patchily, flickering between Thrust/NoThrust within what is
+really one continuous event, even when its overall sense of "something is happening here" is right.
+`--smooth-max-gap N` (default `0`, off) fills short NoThrust gaps *between* two thrusting
+predictions before event-level reporting/plotting, targeting exactly that patchiness.
+
+The naive versions of "smoothing" — a majority-vote window, or erasing short predicted runs
+(minimum-run-length filtering) — are unsafe: they erase short *positive* runs, and a lone true
+positive is indistinguishable from a lone false positive by shape alone, so they trade real
+detections for flicker removal. The safe version only ever **closes gaps** and never erases a
+predicted-positive run, however short:
+
+- **`smoothPerTimestepGrid(pred_grid, max_gap, no_thrust_label=0)`** reuses the existing
+  `_findSegments` helper `_eventLevelReport` already uses (no new segment-finding logic): finds
+  `NoThrust`-label runs per row, and closes (fills in) a run only if it's `<= max_gap` long **and**
+  touches neither end of the row. That edge check transparently handles the classic-ML/PCA+MLP
+  Hankel-window padded prefix too (see `buildHankelWindowRowsPerTimestep`) — a run touching the
+  row's start is never closed, whether it's a genuine leading NoThrust stretch or a hardcoded pad,
+  no `hankel_L`-specific logic needed. Filled frames' *type* (Chemical/Electric/Impulsive) is
+  forward-filled from the frame immediately before the gap, matching this file's existing
+  Impulsive forward-fill precedent (`_getThrustingTime`/`_forwardFillFromFirstEvent`) rather than
+  inventing a new imputation rule.
+- **`_reportEventLevelWithSmoothing(...)`** is the shared report+plot hook every call site below
+  goes through: it always runs the existing `_eventLevelReport` + `plotSequencePrediction` on the
+  **raw** grid first (unchanged from before this flag existed), then — only if `smooth_max_gap >
+  0` — a second, clearly labeled (`"--- After temporal gap-closing ---"`) pass on the gap-closed
+  grid, saved to a `_smoothed`-suffixed plot path. The raw report is never replaced, only
+  supplemented, so the payoff (or lack thereof) is always directly visible side by side. It
+  deliberately does **not** feed into `_reportFromPredictions`'s flat per-timestep accuracy numbers
+  anywhere — those stay on raw predictions throughout, since gap-closing is an event-shape
+  correction, not a general accuracy claim, and flat per-timestep accuracy is dominated by the
+  NoThrust majority class regardless.
+- **One shared hook covers every cascade variant for every family**: `combineCascadePredictions`
+  is the single function backing neural, classic-ML, PCA+MLP, and hybrid cascades, so wiring
+  `smooth_max_gap` in there once covers all of them. Three more small, mechanical edits cover the
+  standalone joint-mode paths (classic-ML `runClassicFamily`, PCA+MLP `runPCAMLPFamily`, and the
+  neural joint block in `main()`). Everything after the smoothed report inside
+  `combineCascadePredictions` (the stage-1/end-to-end flat metrics, `stage2_conditional_acc`,
+  `stage1_only_acc`) stays on the original unsmoothed `final_pred`, unchanged.
+- **Deliberately excluded**: standalone `--minirocket` — its prediction is a single
+  whole-trajectory decision broadcast across every timestep, so every row is already constant;
+  gap-closing on a constant row is an inherent no-op, not worth an unused parameter. (Hybrid's
+  cascade stage 1 is *also* a broadcast, but it still goes through `combineCascadePredictions` like
+  every other cascade — harmless no-op there too, no special-casing needed.)
+
+### Measured effect: it depends entirely on the backbone
+
+`scripts/two_body/sweepSmoothGap.py` trains one model and sweeps gap values on that single fixed
+prediction grid (no retraining per value — `train_model` has no fixed seed, so re-running per value
+would compare *different models*). It also prints the interior-gap length histogram, so a flat
+sweep table is distinguishable from a bug. On `leo/30min-1500`, 100 epochs, standardized:
+
+| Backbone | Interior gaps found | Effect | Best gap |
+|---|---|---|---|
+| LSTM (default / +oversample / +oversample+effective) | **0** | none | n/a |
+| CNN (InceptionTime) | 8 (all length 1) | negligible | n/a |
+| **Transformer** | **373** (max length 3) | Impulsive event recall **+0.9pp**, Chemical/Electric bit-identical | **3** |
+
+The pattern is architectural, not a training-config accident: LSTM and CNN both carry
+local/recurrent context between adjacent timesteps, which structurally suppresses frame-to-frame
+flicker regardless of how well-trained the model is. Transformer's attention has no such smoothness
+bias, so it's the one place gap-closing earns its keep here. **If you're using LSTM or CNN, leave
+this at 0.**
+
+## Separability analysis (`analyzeThrustSeparability.py`)
+
+`scripts/two_body/analyzeThrustSeparability.py` measures how separable the thrust classes are **in
+the data itself** — no model, no training. It exists because three architecturally unrelated
+backbones (LSTM, CNN, Transformer) all converged on Electric event-level precision of 22.5 / 24.0 /
+23.7% at 94–100% recall. Models that different agreeing that closely is evidence of a ceiling
+imposed by the data, not by model capacity.
+
+It computes the same `residual_accel = |dE/dt|/|v|` the physics loss uses and scores how well that
+single physical quantity separates thrusting from coasting frames (ROC AUC), across every available
+propagation window. Results on `leo`, 1500 systems, no measurement noise (i.e. **best case**):
+
+| Window | orbits | Electric AUC (per-frame) | Chemical AUC (per-frame) | Electric AUC (integrated ΔE) |
+|---|---|---|---|---|
+| 10 min | 0.11 | 0.554 | 1.000 | 0.514 |
+| 30 min | 0.33 | 0.522 | 1.000 | 0.527 |
+| 100 min | 1.08 | 0.508 | 1.000 | **0.652** |
+
+**Chemical is trivially separable; Electric is not** — measured *this way*. Per-frame,
+Electric-vs-NoThrust is a coin flip, which fully explains the precision ceiling. But the cause
+turned out to be the measurement itself, not the data.
+
+### Root cause: the Keplerian energy is the wrong invariant
+
+The NoThrust median *signed* `dE/dt` is exactly `+0.000e+00` — the background is a **zero-mean,
+orbit-periodic oscillation** of amplitude ~2.7×10⁻⁶ km/s², and electric thrust adds a
+**constant-sign** bias of only ~+2.0×10⁻⁷ on top of it (the thruster fires along-track, GMAT's
+`ElectricThruster` default), a 1:13 ratio. Chemical sits at ~3.4×10⁻⁵, ~12× *above* the background,
+hence AUC 1.000.
+
+That oscillation is **J2, not drag**, and the distinction is decisive because J2 is removable:
+
+- 49.6% of NoThrust frames have `dE/dt > 0`. Drag can never add energy, so the background is
+  conservative.
+- It tracks **latitude** (+1.3×10⁻⁶ at the equator → −4.9×10⁻⁶ at high latitude, the P₂(sin φ)
+  shape) with **no coherent altitude trend** — the inverse of a drag signature.
+- Its amplitude matches the analytic J2 potential exchange (2.26×10⁻⁶ predicted vs 2.91×10⁻⁶
+  measured). An order-of-magnitude drag estimate is 2.9×10⁻⁹ — **1000× too small to matter, and
+  ~70× smaller than the electric thrust itself.** Drag was never the obstacle.
+
+`E = v²/2 − μ/r` is the *Keplerian* energy, which **is not conserved under J2**: energy shuttles
+between it and the J2 potential term every orbit. Its time derivative therefore measures that
+exchange, not the perturbing forces. Adding the J2 potential term back
+(`qutils.orbital.orbitalEnergyJ2`) collapses the background scatter **55×** (5.5×10⁻⁶ → 9.9×10⁻⁸),
+lifting the thrust signal above it:
+
+| Window | orbits | per-frame AUC (Kep → J2-corr) | integrated AUC (Kep → J2-corr) |
+|---|---|---|---|
+| 10 min | 0.11 | 0.520 → **0.826** | 0.514 → 0.842 |
+| 30 min | 0.33 | 0.517 → **0.835** | 0.527 → **0.940** |
+| 100 min | 1.08 | 0.517 → 0.825 | 0.652 → **1.000** |
+
+**Electric detection was never data-limited — it was a wrong-invariant bug in the feature.**
+Per-frame AUC is ~0.83 at *every* window, so window length was not the binding constraint (an
+earlier revision of this document concluded it was; that conclusion was an artifact of measuring
+with the Keplerian energy and is retracted). Longer windows still help the *integrated* view — 100
+min is perfectly separable — but the 30-min data is already workable at 0.94.
+
+This also corrupted the `chem_elec` pseudo-target: thresholding a residual that is mostly J2
+exchange put **76% of Electric frames on the wrong side** (only 23.4% correctly targeted 0). With
+the J2-inclusive energy that becomes 98.7%. `_computePhysicsResidualTensors` therefore uses
+`orbitalEnergyJ2` **unconditionally** — it is internal, has no prior published results to preserve,
+and there is no reason to keep a knowingly mis-supervising default. The `--energy`/`--energyRate`
+*feature* channels are switched by the opt-in `--j2-energy` flag instead, purely so previously
+logged results stay reproducible; turn it on for any low-thrust work.
+
+The original domain premise behind `--physics-loss-weight` holds up on magnitudes (electric thrust
+2.0×10⁻⁷ is within ~5× of the J3-J6 scale 3.8×10⁻⁸; chemical 3.4×10⁻⁵ within ~3× of J2 1.2×10⁻⁵) —
+but the thing Electric must be separated *from* is the J2 oscillation, ~300× larger than the
+electric thrust itself, not the J3-J6 scale. That distinction is why the `detect` term was removed.
 
 ## Two approaches, compared side by side
 
@@ -296,9 +422,13 @@ final mean-pool over time.
 --test STR / --testSys N   OOD test orbit / system count (defaults to --orbit / --systems)
 --OE / --noise / --norm / --energy   same semantics as the whole-trajectory script
 --energyRate                  additional per-timestep energy-rate-of-change feature
---physics-loss-weight F       auxiliary physics-consistency loss term(s): Chemical-vs-Electric
-                               (--mode joint/stage2) and/or NoThrust-vs-Thrust detection
-                               (--mode joint/stage1); see "Physics-informed loss" above
+--j2-energy                   compute --energy/--energyRate from the J2-INCLUSIVE specific energy
+                               (orbitalEnergyJ2) instead of Keplerian; recommended for low-thrust
+                               work — see "Root cause" under Separability analysis above
+--physics-loss-weight F       auxiliary Chemical-vs-Electric physics-consistency loss term
+                               (--mode joint/stage2 only); see "Physics-informed loss" above
+--smooth-max-gap N            post-hoc: close short NoThrust gaps between thrusting predictions
+                               before event-level reporting/plotting; see "Temporal gap-closing" above
 --velNoise F                velocity noise std (default 1e-3)
 --train_ratio F              (default 0.7; val/test split from the remainder)
 --one-pass                    1 epoch, for smoke tests

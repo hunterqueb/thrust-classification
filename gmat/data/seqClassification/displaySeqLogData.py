@@ -616,12 +616,33 @@ def save_stage_cascade_comparison_plot(eval_df: pd.DataFrame, run_df: pd.DataFra
 
 
 # ───── I/O ─────
-_SUFFIX_RE = re.compile(r"([A-Za-z]+(?:_[A-Za-z]+)*)$")
+# Log stems are built by the training script as f"{propMin}min{systems}{strAdd}" (see logStem in
+# mambaTimeSeriesSeqClassificationGMATThrusts.py), where strAdd is the underscore-joined list of
+# active flags -- "30min1500Energy_OE", "30min1500Energy_J2Energy_OE",
+# "30min1500Energy_OE_PhysLoss0.1". The suffix naming the output directory is everything after the
+# "<propMin>min<systems>" prefix, so matching that prefix and keeping the remainder is what gives
+# each flag combination its own directory.
+#
+# Doing it by prefix rather than by a letters-only pattern anchored to the END of the stem matters
+# because several flag names contain digits, and the old pattern mis-grouped every one of them:
+#   30min1500Energy_J2Energy_OE  -> "Energy_OE"  (the 2 broke the token, and the trailing letters
+#                                   happened to spell a real suffix, so J2-energy runs landed in
+#                                   the SAME directory as plain --energy ones)
+#   30min1500Energy_OE_PhysLoss0.1 -> "unsuffixed" (stem ends in a digit; nothing matched at all,
+#                                     so every such run shared one bucket -- also SmoothGap2,
+#                                     Sinusoids3, VelNoise0.01)
+#   100min800Norm_Noise_Train_640_Test_vleo -> "Test_vleo" (truncated at the 640)
+_STEM_PREFIX_RE = re.compile(r"^\d+min\d+_?")
 
 
 def _suffix(stem: str) -> str:
-    m = _SUFFIX_RE.search(stem)
-    return m.group(1) if m else "unsuffixed"
+    rest = _STEM_PREFIX_RE.sub("", stem, count=1)
+    if rest == stem:
+        # Not a "<propMin>min<systems>..." stem. Keep the whole name rather than guessing at where
+        # the flags start, so an unrecognised scheme still gets its own directory instead of
+        # silently sharing one with something else.
+        return stem or "unsuffixed"
+    return rest or "unsuffixed"
 
 
 def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool = True
