@@ -273,6 +273,69 @@ The original domain premise behind `--physics-loss-weight` holds up on magnitude
 but the thing Electric must be separated *from* is the J2 oscillation, ~300× larger than the
 electric thrust itself, not the J3-J6 scale. That distinction is why the `detect` term was removed.
 
+## Hierarchical residual decomposition (`--residual-ladder`)
+
+The feature-side counterpart to `--physics-loss-weight`. Both encode the same domain fact —
+chemical thrust is O(J2), electric thrust is only O(J3-J6) — but a loss term shapes training and is
+then **discarded at inference**, whereas a feature carries the prior into every forward pass. Given
+that the J2-energy *feature* fix (above) is what actually moved Electric AUC 0.52 → 0.83 while the
+loss term's pseudo-target was 76% wrong until that same fix corrected it, the feature side is the
+better place to put a prior you can compute at inference time. This flag generalizes it.
+
+**Mechanism.** `dE/dt` under a given dynamics truncation measures exactly those accelerations the
+truncation leaves out. So evaluate the energy residual at three successively richer truncations and
+you get a ladder of noise floors; a thrust reveals itself at the rung where it first clears the
+floor. `qutils.orbital.orbitalEnergyZonal(Y, degrees=...)` supplies the energies (it reduces
+*exactly* to `orbitalEnergyJ2` at `degrees=(2,)` and to the Keplerian form at `degrees=()`;
+both verified bit-exact). Five channels, all `log10` of a `g0`-normalized dimensionless ratio:
+
+| # | channel | what it is |
+|---|---|---|
+| 0 | `log10(\|dE_kep/dt\| / (\|v\| g0))` | residual after removing two-body only |
+| 1 | `log10(\|dE_J2/dt\| / (\|v\| g0))` | ... after two-body + J2 |
+| 2 | `log10(\|dE_J2toJ6/dt\| / (\|v\| g0))` | ... after two-body + J2..J6 |
+| 3 | `log10(a_J2 / g0)` | reference rung height: J2 |
+| 4 | `log10(a_J3toJ6 / g0)` | reference rung height: J3-J6 |
+
+`g0`-normalized so the same channel means the same thing in LEO and GEO (the raw accelerations
+differ by ~3 decades between regimes, the ratios do not) — the same regime-agnosticism argument as
+the `--physics-loss-weight` gate. `log10` because the prior is about *orders of magnitude*: in the
+log domain "the residual sits at the J2 rung" is a subtraction a linear layer can express, in the
+linear domain it is a 4-decade ratio a standardized channel cannot resolve. Channels 3-4 carry no
+new information in principle (they are deterministic in `r`) but they are what the residual rungs
+must be *compared against*, and `ch1 - ch3` is literally "how many decades above the J2 rung".
+
+**Measured on `leo/30min-1500`**, per-frame ROC AUC of each channel, thrusting frames vs. all
+NoThrust frames:
+
+| channel | Chemical | Electric | ImpBurn |
+|---|---|---|---|
+| rung 0 (two-body) | 1.000 | **0.506** | 1.000 |
+| rung 1 (+J2) | 1.000 | **0.814** | 1.000 |
+| rung 2 (+J2..J6) | 1.000 | 0.815 | 1.000 |
+| `a_J2/g0` | 0.499 | 0.499 | 0.493 |
+| `a_J3toJ6/g0` | 0.500 | 0.499 | 0.492 |
+
+This is the domain fact reproduced from the data rather than asserted: **Chemical is separable at
+every rung** (it is O(J2), so it stands above even the J2-exchange floor), while **Electric is at
+chance until J2 is removed** and then jumps to 0.814. The coasting floor drops **45.4×** from rung 0
+to rung 1.
+
+**Finding: the residual floor is not zonal.** Rung 1 → rung 2 drops the coasting floor only
+**1.02×** and moves Electric AUC by 0.001. Removing J3-J6 buys essentially nothing, which
+independently confirms the tesseral/sectoral hypothesis in *Known limitations* — GMAT propagates
+degree/order 70×8, and those terms rotate with the Earth so no ECI-static zonal correction can
+touch them. Rung 2 is kept anyway: it is what makes the ladder a decomposition rather than an
+assertion, and the rung1→rung2 gap is a live diagnostic that may not be this small in another
+regime or against another force model.
+
+**Composition.** Computed from the raw dimensional ECI snapshot (`phys_eci_by_class`, taken after
+`apply_noise` so it measures the noisy trajectory the model actually sees), and therefore
+**bit-identical under `--OE`, `--norm`, and `--energy`** — verified. It appends, never replaces.
+Use `--standardize`: these channels sit around −6..−2 while ECI channels are O(1e3). Avoid
+`--sinusoids`, which FFT-decomposes these channels along with every other one and discards the
+per-timestep transient the feature exists to expose.
+
 ## Two approaches, compared side by side
 
 - **Joint**: one model, `num_classes=4`, straight `CrossEntropyLoss` with inverse-frequency class
@@ -425,6 +488,10 @@ final mean-pool over time.
 --j2-energy                   compute --energy/--energyRate from the J2-INCLUSIVE specific energy
                                (orbitalEnergyJ2) instead of Keplerian; recommended for low-thrust
                                work — see "Root cause" under Separability analysis above
+--residual-ladder             +5 hierarchical-residual-decomposition channels (energy residual at
+                               three dynamics truncations + the J2/J3-J6 reference rung heights,
+                               g0-normalized and log10'd); use with --standardize, see
+                               "Hierarchical residual decomposition" above
 --physics-loss-weight F       auxiliary Chemical-vs-Electric physics-consistency loss term
                                (--mode joint/stage2 only); see "Physics-informed loss" above
 --smooth-max-gap N            post-hoc: close short NoThrust gaps between thrusting predictions

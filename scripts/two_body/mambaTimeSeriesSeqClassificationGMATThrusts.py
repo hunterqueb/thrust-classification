@@ -125,6 +125,22 @@ parser.add_argument("--j2-energy", dest="use_j2_energy", action="store_true",
                           "Off by default only so previously logged --energy/--energyRate results stay "
                           "reproducible; the physics-loss pathway (--physics-loss-weight) always uses "
                           "the J2-inclusive form regardless, since it has no such legacy.")
+parser.add_argument("--residual-ladder", dest="use_residual_ladder", action="store_true",
+                     help="Append 5 hierarchical-residual-decomposition channels to the feature set "
+                          "(see _computeResidualLadder). Encodes the domain fact that chemical thrust "
+                          "is O(J2) while electric thrust is only O(J3-J6) by measuring the energy "
+                          "residual under three successively richer dynamics truncations (two-body, "
+                          "+J2, +J2..J6) alongside the J2 and J3-J6 reference rung heights, all "
+                          "g0-normalized (so LEO and GEO share one scale) and log10'd (so 'the "
+                          "residual sits at the J2 rung' is a subtraction rather than a 4-decade "
+                          "ratio). Computed from the raw dimensional ECI snapshot, so it is unaffected "
+                          "by --OE/--norm and composes with any of them. This is the feature-side "
+                          "counterpart to --physics-loss-weight, which asserts the same fact as a "
+                          "training penalty and then discards it at inference. Strongly recommended "
+                          "with --standardize: these channels sit around -6..-2 while ECI channels are "
+                          "O(1e3) and --norm channels are O(1). Note --sinusoids, if also set, "
+                          "FFT-decomposes these channels along with every other one, which discards "
+                          "the per-timestep transient this feature exists to expose.")
 parser.add_argument("--sinusoids", type=int, default=0,
                      help="If > 0, replace each feature channel (ECI/OE, plus --energy/--energyRate "
                           "channels when enabled) with this many dominant sinusoidal components "
@@ -251,6 +267,7 @@ save_to_log = args.save_to_log
 useEnergy = args.use_energy
 useEnergyRate = args.use_energy_rate
 useJ2Energy = args.use_j2_energy
+useResidualLadder = args.use_residual_ladder
 numSinusoids = args.sinusoids
 velNoise = args.velNoise
 train_ratio = args.train_ratio
@@ -304,6 +321,8 @@ if useEnergyRate:
     strAdd = strAdd + "EnergyRate_"
 if useJ2Energy:
     strAdd = strAdd + "J2Energy_"
+if useResidualLadder:
+    strAdd = strAdd + "ResidLadder_"
 if useOE:
     strAdd = strAdd + "OE_"
 if numSinusoids > 0:
@@ -424,7 +443,7 @@ def _decomposeSinusoids(states, num_sinusoids):
     return components.transpose(0, 1, 3, 2).reshape(N, T, C * num_sinusoids)
 
 
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False):
+def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False):
     if useNoise:
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
@@ -439,12 +458,14 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
     if useOE and (useEnergy or useEnergyRate):
         eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
 
-    # Physics-loss inputs (--physics-loss-weight) need raw dimensional (km, km/s) ECI Cartesian
-    # state regardless of what --OE/--norm do to states_by_class below -- unlike eci_by_class
-    # above, this snapshot is taken unconditionally (not gated on useOE) so it stays correct even
-    # under --norm alone.
+    # Physics-loss inputs (--physics-loss-weight) and the residual ladder (--residual-ladder) both
+    # need raw dimensional (km, km/s) ECI Cartesian state regardless of what --OE/--norm do to
+    # states_by_class below -- unlike eci_by_class above, this snapshot is taken unconditionally
+    # (not gated on useOE) so it stays correct even under --norm alone. It is taken AFTER
+    # apply_noise, so under --noise the ladder measures the residual of the noisy trajectory the
+    # model actually sees rather than a clean one the model has no access to.
     phys_eci_by_class = None
-    if usePhysicsLoss:
+    if usePhysicsLoss or useResidualLadder:
         phys_eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
 
     oe_by_class = None
@@ -522,6 +543,16 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         for c in CLASS_ORDER:
             states_by_class[c] = np.concatenate((base[c], extra_channels[c]), axis=2)
 
+    if useResidualLadder:
+        # Hierarchical residual decomposition (--residual-ladder): 5 additional channels appended
+        # to whatever --OE/--energy/--energyRate leave behind, never a replacement (same policy as
+        # the energy channels above). Computed from the raw dimensional ECI snapshot, so these
+        # channels are identical with and without --OE/--norm -- unlike --energy, which silently
+        # changes meaning under --norm (see norming_energy above). See _computeResidualLadder.
+        for c in CLASS_ORDER:
+            ladder = _computeResidualLadder(phys_eci_by_class[c])
+            states_by_class[c] = np.concatenate((states_by_class[c], ladder), axis=2)
+
     if numSinusoids > 0:
         # Decomposes whatever channels the rest of _applyTransforms leaves behind (raw ECI, OE,
         # and/or the energy/energy-rate channels above) -- runs last so it always sees the final
@@ -569,7 +600,91 @@ def _computePhysicsResidualTensors(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
     return h2, h36, g0, residual_accel
 
 
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False):
+# --residual-ladder channel layout, in the order _computeResidualLadder stacks them. Used for the
+# feature-count printout and for anyone reading a saved feature array back.
+RESIDUAL_LADDER_CHANNEL_NAMES = (
+    "log10(|dE_kep/dt| / (|v| g0))",      # rung 0: residual after removing two-body only
+    "log10(|dE_J2/dt| / (|v| g0))",       # rung 1: ... after two-body + J2
+    "log10(|dE_J2toJ6/dt| / (|v| g0))",   # rung 2: ... after two-body + J2..J6
+    "log10(a_J2 / g0)",                   # reference rung height: J2
+    "log10(a_J3toJ6 / g0)",               # reference rung height: J3-J6
+)
+RESIDUAL_LADDER_CHANNELS = len(RESIDUAL_LADDER_CHANNEL_NAMES)
+
+# Floor applied to every dimensionless ratio before the log. The quantities of interest sit around
+# 1e-6..1e-3 (see the docstring), so 1e-12 is ~6 decades below anything meaningful: it exists only
+# to keep an incidental near-zero energy-rate crossing from becoming a -inf/-30 spike that would
+# dominate --standardize's mean/std for the whole channel.
+RESIDUAL_LADDER_FLOOR = 1e-12
+
+
+def _computeResidualLadder(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
+    """Hierarchical residual decomposition. eci_states: [N,T,6] raw ECI Cartesian (km, km/s),
+    pre-OE/pre-norm (see phys_eci_by_class in _applyTransforms). Returns [N,T,5] float32.
+
+    The idea: dE/dt under a given dynamics truncation measures exactly those accelerations the
+    truncation leaves out. So evaluating the energy residual at successively richer truncations
+    gives a ladder of noise floors, and a thrust reveals itself at the rung where it first stands
+    above the floor:
+
+      rung 0 (two-body):    floor is J2 potential exchange, ~2.7e-6 km/s^2 in LEO
+      rung 1 (+J2):         floor drops ~55x to ~9.9e-8 km/s^2 -- J3-J6, tesserals, drag
+      rung 2 (+J2..J6):     floor is whatever is left (tesseral/sectoral terms, drag, noise)
+
+    That is a direct encoding of the domain fact this feature exists for: chemical thrust is
+    O(J2) so it is visible at every rung, while electric thrust is O(J3-J6) so it only clears the
+    floor at rungs 1-2. Rather than asserting that as a loss penalty (--physics-loss-weight,
+    which is discarded at inference), it hands the model the measurements the assertion is about
+    and lets it use them at every forward pass.
+
+    All five channels are dimensionless (divided by g0 = mu/r^2) and log10-scaled:
+
+      * dimensionless, so the same channel means the same thing in LEO and GEO -- the raw
+        accelerations differ by ~3 decades between regimes but the ratios do not, which is what
+        makes this regime-agnostic in the same sense as the --physics-loss-weight gate.
+      * log10, because the prior is about ORDERS OF MAGNITUDE. In the log domain "the residual
+        sits at the J2 rung" is a subtraction, so a linear layer can express it; in the linear
+        domain it is a ratio spanning 4+ decades that a standardized channel cannot resolve.
+
+    Channels 3-4 are the reference rung heights a_J2/g0 and a_J3toJ6/g0. They are deterministic
+    functions of r and so carry no new information in principle, but they are what the residual
+    rungs must be COMPARED against, and in log space channel_k - channel_3 is exactly "how many
+    decades is the residual above the J2 rung" -- the comparison the domain fact is stated in.
+
+    mu/Re/J_n are fixed to the qutils JGM2 constants throughout, matching
+    _computePhysicsResidualTensors, so the two pathways cannot disagree about rung heights.
+    """
+    from qutils.orbital import (MU_EARTH_JGM2, orbitalEnergyZonal, twoBodyAccel,
+                                j2AccelMag, j3to6AccelMag)
+
+    r = eci_states[..., 0:3]                                          # [N,T,3]
+    v_mag = np.linalg.norm(eci_states[..., 3:6], axis=-1)             # [N,T]
+    g0 = twoBodyAccel(r, mu=MU_EARTH_JGM2)                            # [N,T]
+    # |dE/dt| / |v| converts specific power to a thrust-acceleration scale; the further /g0 makes
+    # it dimensionless. Folded into one denominator so it is clamped once.
+    denom = np.maximum(v_mag * g0, 1e-30)
+
+    T = eci_states.shape[1]
+    rungs = []
+    for degrees in ((), (2,), (2, 3, 4, 5, 6)):
+        E = orbitalEnergyZonal(eci_states, degrees=degrees, mu=MU_EARTH_JGM2)   # [N,T]
+        rate = np.zeros_like(E)
+        if T > 1:
+            rate[:, 1:] = np.diff(E, axis=1) / dt_seconds
+            # t=0 has no prior sample. Copy t=1's rate rather than np.diff's usual prepend-zero:
+            # an exact 0 here would floor to log10(1e-12) and put a -12 outlier in every single
+            # trajectory's first frame, skewing --standardize's per-channel statistics.
+            rate[:, 0] = rate[:, 1]
+        rungs.append(np.abs(rate) / denom)
+
+    rungs.append(j2AccelMag(r, mu=MU_EARTH_JGM2) / g0)
+    rungs.append(j3to6AccelMag(r, mu=MU_EARTH_JGM2) / g0)
+
+    ladder = np.stack(rungs, axis=-1)                                 # [N,T,5]
+    return np.log10(np.maximum(ladder, RESIDUAL_LADDER_FLOOR)).astype(np.float32)
+
+
+def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False):
     states_by_class = {}
     thrusting_by_class = {}
     for class_name in CLASS_ORDER:
@@ -586,7 +701,7 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, num
 
     states_by_class, phys_eci_by_class = _applyTransforms(
         states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids,
-        pos_noise_std, vel_noise_std, usePhysicsLoss, useJ2Energy)
+        pos_noise_std, vel_noise_std, usePhysicsLoss, useJ2Energy, useResidualLadder)
 
     states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
 
@@ -773,6 +888,7 @@ def prepareInSequenceThrustClassificationDatasets(
     numSinusoids = yaml_config['numSinusoids']
     usePhysicsLoss = yaml_config.get('usePhysicsLoss', False)
     useJ2Energy = yaml_config.get('useJ2Energy', False)
+    useResidualLadder = yaml_config.get('useResidualLadder', False)
 
     numMinProp = yaml_config['prop_time']
     train_set = yaml_config['orbit']
@@ -789,7 +905,7 @@ def prepareInSequenceThrustClassificationDatasets(
 
     states, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce = _load_and_label(
         dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-        usePhysicsLoss, useJ2Energy
+        usePhysicsLoss, useJ2Energy, useResidualLadder
     )
     if phys_target_ce is None:
         phys_target_ce = np.zeros_like(y_joint, dtype=np.float32)
@@ -805,7 +921,7 @@ def prepareInSequenceThrustClassificationDatasets(
     if test_set != train_set or test_systems != systems:
         states_t, y_joint_t, n_ic_per_class_t, phys_target_ce_t, phys_gate_ce_t = _load_and_label(
             dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-            usePhysicsLoss, useJ2Energy
+            usePhysicsLoss, useJ2Energy, useResidualLadder
         )
         if phys_target_ce_t is None:
             phys_target_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
@@ -2111,6 +2227,7 @@ def main():
         'numSinusoids': numSinusoids,
         'usePhysicsLoss': usePhysicsLoss,
         'useJ2Energy': useJ2Energy,
+        'useResidualLadder': useResidualLadder,
         'prop_time': numMinProp,
         'orbit': orbitType,
         'systems': numRandSys,
