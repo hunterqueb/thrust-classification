@@ -1,8 +1,18 @@
 #!/bin/bash
 #
-# Manuscript sweep: 5 arms x 2 feature sets x 3 windows x 3 seeds = 90 runs.
-# ~25 min each at 30min (CNN is ~60% of it), so budget ~40 hours. Resumable: a cell whose log
-# already carries the completion marker is skipped, so Ctrl-C / reboot / OOM costs one run.
+# Manuscript sweep: 5 arms x 3 feature sets x 3 windows x 3 seeds = 135 runs.
+# Measured 1396s for one 30min cell, so budget ~50 hours. Resumable: a cell whose log already
+# carries the completion marker is skipped, so Ctrl-C / reboot / OOM costs one run.
+#
+# The three feature sets are an INCREMENTAL ablation -- 6 -> 8 -> 11 channels -- so any gain is
+# attributable to one step:
+#   eci    raw ECI, no feature flags                                          (6 ch)
+#   phys   + OE + J2-inclusive energy LEVEL                                   (8 ch)
+#   ladder + hierarchical residual decomposition, energy RATES at 3 rungs     (11 ch)
+# The ladder is deliberately NOT merged into phys: phys is already a bundle of three things, and
+# folding a fourth in would make "physics features help" a claim you cannot decompose. The ladder
+# also has no sequence-model evidence yet -- every number for it so far is per-frame ROC AUC from
+# logistic regression / HistGBT, so it could as easily hurt.
 #
 # Arms are "train:test". combined/leo-meo-geo is deliberately absent -- it is 93% leo (1395 leo /
 # 67 geo / 38 meo) and 1390-1395 of its 1500 ICs are byte-identical to the standalone leo set at
@@ -23,7 +33,7 @@ SYSTEMS="${SYSTEMS:-1500}"
 PROP_MINS="${PROP_MINS:-10 30 100}"
 SEEDS="${SEEDS:-0 1 2}"
 ARMS="${ARMS:-leo:leo meo:meo geo:geo leo:geo geo:leo}"
-FEATS="${FEATS:-eci phys}"
+FEATS="${FEATS:-eci phys ladder}"
 EXTRA="${EXTRA:-}"            # smoke-test escape hatch, e.g. "--one-pass"
 EXTRA_TOK="${EXTRA_TOK:-}"    # MUST mirror what EXTRA adds to strAdd, e.g. "OnePass_"
 PYTHON="${PYTHON:-python}"
@@ -56,10 +66,18 @@ run_one() {   # train test feat propMin seed
     local train=$1 test=$2 feat=$3 propMin=$4 seed=$5
     local feat_args=() feat_tok="" test_args=() test_tok="" evaltest_tok=""
 
-    if [ "$feat" = phys ]; then
-        feat_args=(--OE --energy --j2-energy)
-        feat_tok="Energy_J2Energy_OE_"          # strAdd order: Energy_, J2Energy_, OE_
-    fi
+    # strAdd token order is Energy_, EnergyRate_, J2Energy_, ResidLadder{n}_, OE_ -- mirror it
+    # exactly or the resume check misses and every cell re-runs.
+    case "$feat" in
+        phys)
+            feat_args=(--OE --energy --j2-energy)
+            feat_tok="Energy_J2Energy_OE_" ;;
+        ladder)
+            feat_args=(--OE --energy --j2-energy --residual-ladder)
+            feat_tok="Energy_J2Energy_ResidLadder3_OE_" ;;
+        eci) ;;
+        *)  echo "unknown FEATS value: $feat" >&2; return 1 ;;
+    esac
     if [ "$test" != "$train" ]; then
         test_args=(--test "$test" --testSys "$SYSTEMS")
         test_tok="Test_${test}_"

@@ -38,8 +38,10 @@ def _config(stem: str, relpath: str) -> dict:
         "train": train,
         "test": t.group(1) if t else train,
         "propMin": int(PROP_RE.match(stem).group(1)),
-        # "OE_" is the marker for the phys arm; the eci arm carries no feature tokens at all.
-        "feat": "phys" if re.search(r"(^|_)OE(_|$)", suf) else "eci",
+        # Order matters: the ladder arm is phys PLUS --residual-ladder, so it also carries OE_.
+        # Checking OE first would silently fold the two arms together.
+        "feat": ("ladder" if "ResidLadder" in suf
+                 else "phys" if re.search(r"(^|_)OE(_|$)", suf) else "eci"),
         "seed": int(m.group(1)) if m else -1,
     }
 
@@ -83,15 +85,15 @@ def agg(df: pd.DataFrame, metric: str, keys=KEYS, n_expected: int | None = None)
     return a
 
 
-def paired_delta(df: pd.DataFrame, metric: str) -> pd.DataFrame:
-    """phys minus eci, differenced WITHIN each seed before averaging. Both arms see the same split
-    at a given seed, so pairing removes split variance -- much tighter than mean-minus-mean."""
+def paired_delta(df: pd.DataFrame, metric: str, hi: str = "phys", lo: str = "eci") -> pd.DataFrame:
+    """hi minus lo, differenced WITHIN each seed before averaging. Both arms see the same split at
+    a given seed, so pairing removes split variance -- much tighter than mean-minus-mean."""
     keys = [k for k in KEYS if k != "feat"] + ["seed"]
     w = df.pivot_table(index=keys, columns="feat", values=metric, aggfunc="mean")
-    if not {"eci", "phys"} <= set(w.columns):
+    if not {lo, hi} <= set(w.columns):
         return pd.DataFrame()
-    w = w.dropna(subset=["eci", "phys"])
-    w["d"] = w["phys"] - w["eci"]
+    w = w.dropna(subset=[lo, hi])
+    w["d"] = w[hi] - w[lo]
     out = w.reset_index().groupby([k for k in keys if k != "seed"])["d"].agg(["mean", "std", "count"]).reset_index()
     out["cell"] = [f"{m:+.3f} $\\pm$ {s:.3f}" if n >= 2 else f"{m:+.3f}"
                    for m, s, n in zip(out["mean"], out["std"], out["count"])]
@@ -150,11 +152,14 @@ def main() -> None:
              a.out_dir / f"t2_features_{tag}.tex",
              f"Feature-set ablation, in-distribution {metric.replace('_', ' ')} "
              f"({hp} min), mean $\\pm$ std over {a.seeds} seeds.", f"tab:feat_{tag}")
-        d = paired_delta(ind[(ind.propMin == hp) & ind.eval_stage.isin(both)], metric)
-        emit(_pivot(d, ["model", "eval_stage"], "train"),
-             a.out_dir / f"t2_features_{tag}_delta.tex",
-             f"Paired phys $-$ eci delta in {metric.replace('_', ' ')} ({hp} min), differenced "
-             f"within each seed then averaged.", f"tab:featdelta_{tag}")
+        # One delta per ablation STEP, so a gain is attributable to the feature that caused it
+        # rather than to the whole bundle.
+        for hi, lo in (("phys", "eci"), ("ladder", "phys")):
+            d = paired_delta(ind[(ind.propMin == hp) & ind.eval_stage.isin(both)], metric, hi, lo)
+            emit(_pivot(d, ["model", "eval_stage"], "train"),
+                 a.out_dir / f"t2_features_{tag}_delta_{hi}_vs_{lo}.tex",
+                 f"Paired {hi} $-$ {lo} delta in {metric.replace('_', ' ')} ({hp} min), "
+                 f"differenced within each seed then averaged.", f"tab:featdelta_{tag}_{hi}")
 
     # T3 -- window length.
     t = agg(ind[(ind.feat == "phys") & ind.eval_stage.isin(both)], "macro_f1", n_expected=a.seeds)
@@ -242,6 +247,14 @@ def _selfcheck() -> None:
         "train": "geo", "test": "geo", "propMin": 100, "feat": "eci", "seed": 2}
     assert _config("10min1500Energy_J2Energy_OE_EvalTest_Seed0", "meo/10min-1500/x.log") == {
         "train": "meo", "test": "meo", "propMin": 10, "feat": "phys", "seed": 0}
+    # The ladder arm is phys PLUS --residual-ladder, so it also carries OE_ -- it must not be
+    # folded into phys, or the two arms average together and the ablation step vanishes.
+    assert _config("30min1500Energy_J2Energy_ResidLadder3_OE_EvalTest_Seed2",
+                   "geo/30min-1500/x.log") == {
+        "train": "geo", "test": "geo", "propMin": 30, "feat": "ladder", "seed": 2}
+    assert _config("30min1500Energy_J2Energy_ResidLadder5_OE_Test_leo_Seed1",
+                   "geo/30min-1500/x.log") == {
+        "train": "geo", "test": "leo", "propMin": 30, "feat": "ladder", "seed": 1}
     # The one that matters: pre-existing non-sweep logs carry no seed, so the load() filter drops
     # them -- and their OE token must not fool the feat detector into claiming they are sweep rows.
     assert SEED_RE.search(_suffix("30min1500Energy_J2Energy_ResidLadder3_OE")) is None
