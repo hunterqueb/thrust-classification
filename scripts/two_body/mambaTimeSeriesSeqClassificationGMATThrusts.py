@@ -141,6 +141,15 @@ parser.add_argument("--residual-ladder", dest="use_residual_ladder", action="sto
                           "O(1e3) and --norm channels are O(1). Note --sinusoids, if also set, "
                           "FFT-decomposes these channels along with every other one, which discards "
                           "the per-timestep transient this feature exists to expose.")
+parser.add_argument("--residual-ladder-full", dest="use_residual_ladder_full", action="store_true",
+                     help="With --residual-ladder, emit all 5 ladder channels (every residual rung "
+                          "plus both reference heights) instead of the default lean 3 (deepest rung "
+                          "+ both reference heights). Measured per-frame on leo/30min-1500, the two "
+                          "extra rungs buy ~0.003 Electric-vs-NoThrust AUC and rungs 1-2 are 0.944 "
+                          "correlated, so the lean set is the default -- but that ablation is "
+                          "memoryless and the backbones here are sequence models, which may be able "
+                          "to use rung 0 as an orbital-phase reference for the local noise floor. "
+                          "Run runResidLadderAB.sh to test that. No effect without --residual-ladder.")
 parser.add_argument("--sinusoids", type=int, default=0,
                      help="If > 0, replace each feature channel (ECI/OE, plus --energy/--energyRate "
                           "channels when enabled) with this many dominant sinusoidal components "
@@ -226,6 +235,26 @@ parser.add_argument("--smooth-max-gap", type=int, default=0, dest="smooth_max_ga
                           "plot always run first and are never replaced; a --smooth-max-gap > 0 "
                           "adds a second, separately labeled report+plot on the gap-closed grid, "
                           "so the payoff is always visible side by side. 0 (default): fully off.")
+parser.add_argument("--seed", type=int, default=None,
+                     help="Seed the IC train/val/test group split AND torch/numpy init, making a run "
+                          "reproducible and making two runs that differ only in a feature flag a PAIRED "
+                          "comparison on the same split. Without it every invocation draws a fresh split, "
+                          "so A/B differences are confounded by split variance (which has moved these "
+                          "numbers before). Tagged into the log stem as Seed<n>, LAST, so repeated seeds "
+                          "of one flag set land in separate logs instead of silently overwriting each "
+                          "other -- strAdd does not encode --mode/--loss-scheme/--standardize/backbones, "
+                          "so without this token all seeds of a cell would compute the same path. "
+                          "Default None: fresh entropy, and no token, so previously logged runs keep "
+                          "reproducing their existing stems.")
+parser.add_argument("--eval-test", dest="eval_test", action="store_true",
+                     help="Evaluate on the held-out test split even when the test orbit equals the train "
+                          "orbit. By default an in-distribution run reports on the VALIDATION split, which "
+                          "is also what early stopping and best-checkpoint restore select on -- so those "
+                          "numbers are optimistically biased, and are not comparable against a cross-orbit "
+                          "run, which does report on a genuinely held-out split. The IC-disjoint 15% test "
+                          "split already exists in that branch and is simply unused. Turn this on for any "
+                          "table that puts in-distribution and cross-regime results side by side. Tagged "
+                          "as EvalTest_ so it cannot collide with existing logs.")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(use_mamba=True)
@@ -268,6 +297,7 @@ useEnergy = args.use_energy
 useEnergyRate = args.use_energy_rate
 useJ2Energy = args.use_j2_energy
 useResidualLadder = args.use_residual_ladder
+useResidualLadderFull = args.use_residual_ladder_full
 numSinusoids = args.sinusoids
 velNoise = args.velNoise
 train_ratio = args.train_ratio
@@ -290,6 +320,8 @@ useStandardize = args.standardize
 physicsLossWeight = args.physics_loss_weight
 usePhysicsLoss = physicsLossWeight > 0
 smoothMaxGap = args.smooth_max_gap
+runSeed = args.seed
+evalTest = args.eval_test
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -312,7 +344,58 @@ from qutils.ml.utils import getDevice, printModelParmSize
 from qutils.ml.classifer import apply_noise
 from qutils.ml.mamba import Mamba, MambaConfig
 
+if runSeed is not None:
+    # Seeding the split alone (via _icGroupSplit's default_rng) would leave weight init, dropout and
+    # the WeightedRandomSampler draw unseeded -- enough for a valid variance estimate across seeds,
+    # but not enough to regenerate a specific table row. This is the first legal spot: torch/numpy
+    # are imported after argument parsing.
+    torch.manual_seed(runSeed)
+    np.random.seed(runSeed)
+
 device = getDevice()
+
+# --residual-ladder channel layout, in the order _computeResidualLadder computes them. Used for the
+# feature-count printout and for anyone reading a saved feature array back.
+RESIDUAL_LADDER_ALL_CHANNEL_NAMES = (
+    "log10(|dE_kep/dt| / (|v| g0))",      # rung 0: residual after removing two-body only
+    "log10(|dE_J2/dt| / (|v| g0))",       # rung 1: ... after two-body + J2
+    "log10(|dE_J2toJ6/dt| / (|v| g0))",   # rung 2: ... after two-body + J2..J6
+    "log10(a_J2 / g0)",                   # reference rung height: J2
+    "log10(a_J3toJ6 / g0)",               # reference rung height: J3-J6
+)
+
+# LEAN (default) keeps only the DEEPEST residual rung plus the two reference rung heights.
+#
+# Measured on leo/30min-1500, per-frame Electric-vs-NoThrust test AUC over an IC-split
+# (1000 train / 500 test ICs), logistic regression / HistGradientBoosting:
+#
+#   rung 2 alone      0.8175 / 0.8127     three rungs (0,1,2)  0.8168 / 0.8193
+#   rung 2 + refs     0.8187 / 0.8274     all five             0.8182 / 0.8301
+#
+# Stacking three residual rungs instead of one buys ~0.007 AUC, and rungs 1 and 2 are 0.944
+# correlated -- they are near-duplicates, because the coasting floor barely moves between them
+# (1.02x; the leftover is non-zonal, see the docs). What actually earns its channels is the pair
+# of REFERENCE heights: rung 2 alone 0.8127 -> rung 2 + refs 0.8274 under the nonlinear model.
+# So the lean set drops the two redundant rungs, not the comparison baselines, for 0.003 AUC.
+#
+# The multi-rung form is kept behind --residual-ladder-full: rung-to-rung drops are the diagnostic
+# that told us the residual floor is not zonal, and that may not hold in another regime or against
+# another force model. Caveat: the ablation above is per-frame and memoryless, while the backbones
+# here are sequence models -- rung 0 is dominated by the J2 along-track projection, a smooth
+# function of orbital phase that a sequence model could in principle use as a phase reference for
+# the local floor. Untested; --residual-ladder-full vs. default is the A/B (see runResidLadderAB.sh).
+RESIDUAL_LADDER_LEAN_INDICES = (2, 3, 4)
+
+
+def residualLadderChannelNames(full=False):
+    if full:
+        return RESIDUAL_LADDER_ALL_CHANNEL_NAMES
+    return tuple(RESIDUAL_LADDER_ALL_CHANNEL_NAMES[i] for i in RESIDUAL_LADDER_LEAN_INDICES)
+
+
+def residualLadderChannelCount(full=False):
+    return len(residualLadderChannelNames(full))
+
 
 strAdd = ""
 if useEnergy:
@@ -322,7 +405,12 @@ if useEnergyRate:
 if useJ2Energy:
     strAdd = strAdd + "J2Energy_"
 if useResidualLadder:
-    strAdd = strAdd + "ResidLadder_"
+    # Tagged with the explicit channel count rather than a bare "ResidLadder_": the A/B this flag
+    # exists for compares 3 vs 5 channels, so the count has to be in the log stem or the two arms
+    # land in the same parsed_data directory and silently overwrite each other (exactly the
+    # collision displaySeqLogData.py's _suffix was fixed for). Note logs already on disk tagged
+    # "ResidLadder_" predate this switch and are 5-channel runs.
+    strAdd = strAdd + f"ResidLadder{residualLadderChannelCount(useResidualLadderFull)}_"
 if useOE:
     strAdd = strAdd + "OE_"
 if numSinusoids > 0:
@@ -343,6 +431,15 @@ if physicsLossWeight > 0:
     strAdd = strAdd + f"PhysLoss{physicsLossWeight}_"
 if smoothMaxGap > 0:
     strAdd = strAdd + f"SmoothGap{smoothMaxGap}_"
+if evalTest and testSet == orbitType:
+    # Only meaningful in-distribution: cross-orbit runs already evaluate on the held-out test split,
+    # and they carry Test_<orbit>_ above, so tagging them too would split one arm across two names.
+    strAdd = strAdd + "EvalTest_"
+if runSeed is not None:
+    # LAST, deliberately. The sweep script mirrors this stem by string concatenation, so a token that
+    # is always final means the stem has no conditional tail; and "Seed\d+$" then doubles as the
+    # aggregator's "is this a sweep log" filter, excluding pre-existing logs in the same directories.
+    strAdd = strAdd + f"Seed{runSeed}_"
 
 if strAdd.endswith("_"):
     strAdd = strAdd[:-1]
@@ -443,7 +540,7 @@ def _decomposeSinusoids(states, num_sinusoids):
     return components.transpose(0, 1, 3, 2).reshape(N, T, C * num_sinusoids)
 
 
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False):
+def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False, useResidualLadderFull=False):
     if useNoise:
         for c in CLASS_ORDER:
             states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
@@ -550,7 +647,7 @@ def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEn
         # channels are identical with and without --OE/--norm -- unlike --energy, which silently
         # changes meaning under --norm (see norming_energy above). See _computeResidualLadder.
         for c in CLASS_ORDER:
-            ladder = _computeResidualLadder(phys_eci_by_class[c])
+            ladder = _computeResidualLadder(phys_eci_by_class[c], full=useResidualLadderFull)
             states_by_class[c] = np.concatenate((states_by_class[c], ladder), axis=2)
 
     if numSinusoids > 0:
@@ -600,17 +697,6 @@ def _computePhysicsResidualTensors(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
     return h2, h36, g0, residual_accel
 
 
-# --residual-ladder channel layout, in the order _computeResidualLadder stacks them. Used for the
-# feature-count printout and for anyone reading a saved feature array back.
-RESIDUAL_LADDER_CHANNEL_NAMES = (
-    "log10(|dE_kep/dt| / (|v| g0))",      # rung 0: residual after removing two-body only
-    "log10(|dE_J2/dt| / (|v| g0))",       # rung 1: ... after two-body + J2
-    "log10(|dE_J2toJ6/dt| / (|v| g0))",   # rung 2: ... after two-body + J2..J6
-    "log10(a_J2 / g0)",                   # reference rung height: J2
-    "log10(a_J3toJ6 / g0)",               # reference rung height: J3-J6
-)
-RESIDUAL_LADDER_CHANNELS = len(RESIDUAL_LADDER_CHANNEL_NAMES)
-
 # Floor applied to every dimensionless ratio before the log. The quantities of interest sit around
 # 1e-6..1e-3 (see the docstring), so 1e-12 is ~6 decades below anything meaningful: it exists only
 # to keep an incidental near-zero energy-rate crossing from becoming a -inf/-30 spike that would
@@ -618,9 +704,13 @@ RESIDUAL_LADDER_CHANNELS = len(RESIDUAL_LADDER_CHANNEL_NAMES)
 RESIDUAL_LADDER_FLOOR = 1e-12
 
 
-def _computeResidualLadder(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
+def _computeResidualLadder(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS, full=False):
     """Hierarchical residual decomposition. eci_states: [N,T,6] raw ECI Cartesian (km, km/s),
-    pre-OE/pre-norm (see phys_eci_by_class in _applyTransforms). Returns [N,T,5] float32.
+    pre-OE/pre-norm (see phys_eci_by_class in _applyTransforms). Returns [N,T,C] float32, where
+    C is 3 for the default lean set (deepest rung + both reference heights) and 5 with full=True
+    (every rung). All five are always computed -- the switch only selects which are returned, so
+    the two forms are guaranteed bit-identical on the channels they share. See
+    RESIDUAL_LADDER_LEAN_INDICES for the ablation behind that default.
 
     The idea: dE/dt under a given dynamics truncation measures exactly those accelerations the
     truncation leaves out. So evaluating the energy residual at successively richer truncations
@@ -681,10 +771,12 @@ def _computeResidualLadder(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
     rungs.append(j3to6AccelMag(r, mu=MU_EARTH_JGM2) / g0)
 
     ladder = np.stack(rungs, axis=-1)                                 # [N,T,5]
+    if not full:
+        ladder = ladder[..., list(RESIDUAL_LADDER_LEAN_INDICES)]      # [N,T,3]
     return np.log10(np.maximum(ladder, RESIDUAL_LADDER_FLOOR)).astype(np.float32)
 
 
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False):
+def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False, useResidualLadderFull=False):
     states_by_class = {}
     thrusting_by_class = {}
     for class_name in CLASS_ORDER:
@@ -701,7 +793,8 @@ def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, num
 
     states_by_class, phys_eci_by_class = _applyTransforms(
         states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids,
-        pos_noise_std, vel_noise_std, usePhysicsLoss, useJ2Energy, useResidualLadder)
+        pos_noise_std, vel_noise_std, usePhysicsLoss, useJ2Energy, useResidualLadder,
+        useResidualLadderFull)
 
     states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
 
@@ -889,6 +982,7 @@ def prepareInSequenceThrustClassificationDatasets(
     usePhysicsLoss = yaml_config.get('usePhysicsLoss', False)
     useJ2Energy = yaml_config.get('useJ2Energy', False)
     useResidualLadder = yaml_config.get('useResidualLadder', False)
+    useResidualLadderFull = yaml_config.get('useResidualLadderFull', False)
 
     numMinProp = yaml_config['prop_time']
     train_set = yaml_config['orbit']
@@ -905,7 +999,7 @@ def prepareInSequenceThrustClassificationDatasets(
 
     states, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce = _load_and_label(
         dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-        usePhysicsLoss, useJ2Energy, useResidualLadder
+        usePhysicsLoss, useJ2Energy, useResidualLadder, useResidualLadderFull
     )
     if phys_target_ce is None:
         phys_target_ce = np.zeros_like(y_joint, dtype=np.float32)
@@ -921,7 +1015,7 @@ def prepareInSequenceThrustClassificationDatasets(
     if test_set != train_set or test_systems != systems:
         states_t, y_joint_t, n_ic_per_class_t, phys_target_ce_t, phys_gate_ce_t = _load_and_label(
             dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-            usePhysicsLoss, useJ2Energy, useResidualLadder
+            usePhysicsLoss, useJ2Energy, useResidualLadder, useResidualLadderFull
         )
         if phys_target_ce_t is None:
             phys_target_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
@@ -2228,6 +2322,7 @@ def main():
         'usePhysicsLoss': usePhysicsLoss,
         'useJ2Energy': useJ2Energy,
         'useResidualLadder': useResidualLadder,
+        'useResidualLadderFull': useResidualLadderFull,
         'prop_time': numMinProp,
         'orbit': orbitType,
         'systems': numRandSys,
@@ -2248,6 +2343,7 @@ def main():
         train_ratio=train_ratio, val_ratio=val_ratio, test_ratio=test_ratio,
         pos_noise_std=1e3 * velNoise, vel_noise_std=velNoise,
         batch_size=16, oversample=useOversample, standardize=useStandardize,
+        seed=runSeed,
     )
 
     input_size = train_data.shape[2]
@@ -2259,7 +2355,10 @@ def main():
         num_epochs = 1
     schedulerPatience = 5
 
-    use_test_eval = (testSet != orbitType or testSys != numRandSys)
+    # Without --eval-test an in-distribution run falls through to val_loader -- the same split early
+    # stopping and best-checkpoint restore select on, so those numbers are optimistically biased and
+    # not comparable against a cross-orbit run's held-out numbers.
+    use_test_eval = (testSet != orbitType or testSys != numRandSys or evalTest)
     eval_loader = test_loader if use_test_eval else val_loader
     eval_data = test_data if use_test_eval else val_data
     eval_joint = test_joint if use_test_eval else val_joint
