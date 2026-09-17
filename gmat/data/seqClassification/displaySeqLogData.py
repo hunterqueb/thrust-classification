@@ -12,15 +12,24 @@ LightGBM) for per-timestep 4-class thrust typing:
 
 Emits, per log, mirroring gmat/data/classification/displayLogData.py's layout:
   parsed_data/<orbit>/<run-dir>/<suffix>/csv/
-      runs_<stem>.csv         one row per training run (backbone x component)
-      epochs_<stem>.csv       one row per epoch per training run
-      eval_<stem>.csv         one row per evaluated report (joint / cascade stage1 / cascade
-                               end-to-end / stage1-solo / stage2-solo)
-      comparison_<stem>.csv   one row per backbone: joint vs. cascade head-to-head
+      runs.csv         one row per training run (backbone x component)
+      epochs.csv       one row per epoch per training run
+      eval.csv         one row per evaluated report (joint / cascade stage1 / cascade stage2 /
+                        cascade end-to-end / stage1-solo / stage2-solo)
+      comparison.csv   one row per backbone: joint vs. cascade head-to-head
   parsed_data/<orbit>/<run-dir>/<suffix>/plots/
-      epoch_f1_<stem>.png, epoch_loss_<stem>.png
-      comparison_<stem>.png   grouped bar chart: joint vs. cascade accuracy & macro-F1
-      confmats/confmat_<stem>_<backbone>_<eval_stage>.png
+      epoch_f1.png, epoch_loss.png
+      comparison.png        grouped bar chart: joint vs. cascade accuracy & macro-F1
+      stage_comparison.png  stage 1 vs. stage 1 and stage 2 vs. stage 2, across backbones
+      confmats/confmat_<backbone>_<eval_stage>.png
+
+NOTE: these filenames deliberately do NOT repeat the log stem -- <run-dir>/<suffix> already
+encodes it (<suffix> is derived from the stem by _suffix()), and every CSV also carries log_stem /
+log_relpath columns, so nothing is lost. Putting the stem back in would duplicate the run name in
+the path and blow Windows' 260-char MAX_PATH: with a stem like
+"100min1500Energy_J2Energy_ResidLadder3_OE_EvalTest_Seed0" the confmat path hit exactly 260 chars
+and savefig died with a misleading FileNotFoundError (the directory existed fine; Windows reports
+a too-long path as ENOENT). Keep run identity in the directory, not in every filename.
 
 Usage:
 python displaySeqLogData.py . --force
@@ -658,14 +667,14 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
         for d in (csv_dir, cm_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-    runs_csv = csv_dir / f"runs_{stem}.csv"
-    epochs_csv = csv_dir / f"epochs_{stem}.csv"
-    eval_csv = csv_dir / f"eval_{stem}.csv"
-    comparison_csv = csv_dir / f"comparison_{stem}.csv"
-    f1_png = plot_dir / f"epoch_f1_{stem}.png"
-    loss_png = plot_dir / f"epoch_loss_{stem}.png"
-    comparison_png = plot_dir / f"comparison_{stem}.png"
-    stage_comparison_png = plot_dir / f"stage_comparison_{stem}.png"
+    runs_csv = csv_dir / "runs.csv"
+    epochs_csv = csv_dir / "epochs.csv"
+    eval_csv = csv_dir / "eval.csv"
+    comparison_csv = csv_dir / "comparison.csv"
+    f1_png = plot_dir / "epoch_f1.png"
+    loss_png = plot_dir / "epoch_loss.png"
+    comparison_png = plot_dir / "comparison.png"
+    stage_comparison_png = plot_dir / "stage_comparison.png"
 
     if emit_outputs and not force and all(
         p.exists() for p in (runs_csv, epochs_csv, eval_csv, comparison_csv, f1_png, loss_png)
@@ -695,7 +704,7 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
 
         def _save_cm(section, tag, title):
             if emit_outputs and section["confusion_matrix"] is not None:
-                png = cm_dir / f"confmat_{stem}_{backbone}_{tag}.png"
+                png = cm_dir / f"confmat_{backbone.replace(' ', '_')}_{tag}.png"
                 save_confusion_matrix(section["confusion_matrix"], section["labels"], png, title)
 
         if component == "Joint":
