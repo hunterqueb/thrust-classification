@@ -1,0 +1,1975 @@
+Processing datasets for geo with 10 minutes and 1500 random systems.
+Training data location: /home/hunter/git/GMAT-Thrust-Data/data/seqClassification/geo/10min-1500
+Test data location: /home/hunter/git/GMAT-Thrust-Data/data/seqClassification/geo/10min-1500
+Standardize: per-channel train mean range [-664.8, 0.08358], std range [1.529, 2.615e+04] -> all channels z-scored
+train_data (4200, 10, 6)  val_data (900, 10, 6)  test_data (900, 10, 6)
+
+================================================================================
+Backbone: LSTM
+================================================================================
+
+Entering LSTM Joint (4-class) Training Loop
+Epoch [1/100] Train Loss: 1.3853
+Val Event P(macro [1, 2, 3]): 0.0781 | R: 0.3306 | F1: 0.1223
+Per-class P: [1.         0.         0.21142649 0.02279006]  R: [0.09156627 0.         0.69831731 0.29333333]  F1: [0.16777042 0.         0.32458101 0.04229414]
+Val Loss: 1.3932
+Epoch [2/100] Train Loss: 1.3638
+Val Event P(macro [1, 2, 3]): 0.0963 | R: 0.2888 | F1: 0.0516
+Per-class P: [0.86557112 0.07734912 0.21153846 0.        ]  R: [0.48388554 0.85987261 0.00661058 0.        ]  F1: [0.62074961 0.14193096 0.01282051 0.        ]
+Val Loss: 1.3418
+Epoch [3/100] Train Loss: 1.3170
+Val Event P(macro [1, 2, 3]): 0.1139 | R: 0.3082 | F1: 0.1559
+Per-class P: [0.91541916 0.0737037  0.24120235 0.02666667]  R: [0.36837349 0.42250531 0.39543269 0.10666667]  F1: [0.52534364 0.12551246 0.2996357  0.04266667]
+Val Loss: 1.3094
+Epoch [4/100] Train Loss: 1.2940
+Val Event P(macro [1, 2, 3]): 0.1210 | R: 0.3376 | F1: 0.0838
+Per-class P: [0.94912281 0.08308157 0.25       0.02995868]  R: [0.32590361 0.4670913  0.03004808 0.51555556]  F1: [0.48520179 0.14107086 0.05364807 0.0566268 ]
+Val Loss: 1.2837
+Epoch [5/100] Train Loss: 1.2894
+Val Event P(macro [1, 2, 3]): 0.1173 | R: 0.3148 | F1: 0.1597
+Per-class P: [0.91506647 0.06828442 0.24853372 0.03515625]  R: [0.37319277 0.25690021 0.40745192 0.28      ]  F1: [0.53016688 0.10789122 0.30874317 0.06246901]
+Val Loss: 1.2731
+Epoch [6/100] Train Loss: 1.2874
+Val Event P(macro [1, 2, 3]): 0.1203 | R: 0.3529 | F1: 0.1640
+Per-class P: [0.95700935 0.08944954 0.24249605 0.02886406]  R: [0.30843373 0.41401274 0.36899038 0.27555556]  F1: [0.46651481 0.1471143  0.29265968 0.05225453]
+Val Loss: 1.2758
+Epoch [7/100] Train Loss: 1.2854
+Val Event P(macro [1, 2, 3]): 0.1154 | R: 0.3655 | F1: 0.1464
+Per-class P: [0.9553407  0.08433406 0.23041475 0.03151261]  R: [0.3125     0.65605096 0.24038462 0.2       ]  F1: [0.47094871 0.14945586 0.23529412 0.05444646]
+Val Loss: 1.2911
+Epoch [8/100] Train Loss: 1.2841
+Val Event P(macro [1, 2, 3]): 0.1161 | R: 0.3462 | F1: 0.1569
+Per-class P: [0.96421756 0.0825     0.23873122 0.02693208]  R: [0.30436747 0.49044586 0.34375    0.20444444]  F1: [0.46268315 0.14124121 0.2817734  0.04759441]
+Val Loss: 1.2711
+Epoch [9/100] Train Loss: 1.2842
+Val Event P(macro [1, 2, 3]): 0.1132 | R: 0.3147 | F1: 0.0876
+Per-class P: [0.88519448 0.07806245 0.22865854 0.03278689]  R: [0.425      0.82802548 0.04507212 0.07111111]  F1: [0.57427757 0.14267423 0.0753012  0.04488079]
+Val Loss: 1.2696
+Epoch [10/100] Train Loss: 1.2834
+Val Event P(macro [1, 2, 3]): 0.1200 | R: 0.3371 | F1: 0.1484
+Per-class P: [0.9012605  0.08221851 0.24162679 0.0361991 ]  R: [0.3876506  0.62632696 0.24278846 0.14222222]  F1: [0.542123   0.145356   0.24220624 0.05770965]
+Val Loss: 1.2730
+Epoch [11/100] Train Loss: 1.2828
+Val Event P(macro [1, 2, 3]): 0.0922 | R: 0.3276 | F1: 0.1430
+Per-class P: [0.94755245 0.         0.24338722 0.03312303]  R: [0.32650602 0.         0.79627404 0.18666667]  F1: [0.48566308 0.         0.37281936 0.05626256]
+Val Loss: 1.2881
+Epoch [12/100] Train Loss: 1.2839
+Val Event P(macro [1, 2, 3]): 0.1175 | R: 0.3458 | F1: 0.1480
+Per-class P: [1.         0.078125   0.24356548 0.03077754]  R: [0.27108434 0.01061571 0.7734375  0.25333333]  F1: [0.42654028 0.01869159 0.37046632 0.05488686]
+Val Loss: 1.2885
+Epoch [13/100] Train Loss: 1.2825
+Val Event P(macro [1, 2, 3]): 0.0363 | R: 0.3796 | F1: 0.0661
+Per-class P: [1.         0.07722222 0.         0.03166667]  R: [0.27108434 0.88535032 0.         0.25333333]  F1: [0.42654028 0.14205416 0.         0.0562963 ]
+Val Loss: 1.2754
+Epoch [14/100] Train Loss: 1.2816
+Val Event P(macro [1, 2, 3]): 0.0275 | R: 0.3359 | F1: 0.0318
+Per-class P: [1.         0.05084746 0.         0.03173464]  R: [0.27108434 0.02547771 0.         0.98222222]  F1: [0.42654028 0.03394625 0.         0.06148282]
+Val Loss: 1.2914
+Epoch [15/100] Train Loss: 1.2817
+Val Event P(macro [1, 2, 3]): 0.0909 | R: 0.3436 | F1: 0.1414
+Per-class P: [1.         0.         0.24182156 0.03076923]  R: [0.27108434 0.         0.78185096 0.24888889]  F1: [0.42654028 0.         0.36939239 0.05476773]
+Val Loss: 1.2819
+Epoch [16/100] Train Loss: 1.2804
+Val Event P(macro [1, 2, 3]): 0.1172 | R: 0.3286 | F1: 0.1514
+Per-class P: [0.92688679 0.07919152 0.24333662 0.02903683]  R: [0.35512048 0.507431   0.29627404 0.18222222]  F1: [0.51350174 0.13700201 0.26720867 0.05009163]
+Val Loss: 1.2704
+Epoch [17/100] Train Loss: 1.2791
+Val Event P(macro [1, 2, 3]): 0.1158 | R: 0.3760 | F1: 0.1075
+Per-class P: [1.         0.0787234  0.23817568 0.03039832]  R: [0.27108434 0.78556263 0.08473558 0.25777778]  F1: [0.42654028 0.14310578 0.125      0.0543835 ]
+Val Loss: 1.2841
+Epoch [18/100] Train Loss: 1.2795
+Val Event P(macro [1, 2, 3]): 0.1188 | R: 0.3599 | F1: 0.1652
+Per-class P: [0.97420635 0.08346645 0.24227941 0.03068182]  R: [0.29578313 0.44373673 0.39603365 0.24      ]  F1: [0.45378928 0.1405042  0.30063869 0.05440806]
+Val Loss: 1.2731
+Epoch [19/100] Train Loss: 1.2792
+Val Event P(macro [1, 2, 3]): 0.1162 | R: 0.3514 | F1: 0.1069
+Per-class P: [0.94658494 0.08090452 0.23776224 0.03003697]  R: [0.32560241 0.6836518  0.08173077 0.28888889]  F1: [0.48453608 0.14468659 0.1216458  0.05441607]
+Val Loss: 1.2751
+Early stopping triggered.
+Restored best weights from epoch 9 (best loss 1.2696, lowest val loss 1.2696).
+
+	Elapsed time is 18.0716 seconds.
+
+==========================================================================================
+Total parameters: 28660
+Total memory (bytes): 229280
+Total memory (MB): 0.218658447265625
+==========================================================================================
+
+LSTM Joint Validation
+Accuracy: 36.42% (3278/9000)
+Per-Class Accuracy:
+  No Thrust: 42.32% (2814/6649)
+  Chemical: 82.10% (376/458)
+  Electric: 3.96% (66/1668)
+  Impulsive: 9.78% (22/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8871    0.4232    0.5731      6649
+    Chemical     0.0747    0.8210    0.1370       458
+    Electric     0.2391    0.0396    0.0679      1668
+   Impulsive     0.0423    0.0978    0.0591       225
+
+    accuracy                         0.3642      9000
+   macro avg     0.3108    0.3454    0.2092      9000
+weighted avg     0.7046    0.3642    0.4444      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         2814        3271         185          379
+T_Chemical            47         376          16           19
+T_Electric           272        1230          66          100
+T_Impulsive           39         155           9           22
+
+LSTM Joint Inference Time	Elapsed time is 0.0885 seconds.
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         900    91.11%      22.78%
+Electric             225         276    29.33%      23.91%
+Impulsive            225         520     9.78%       4.23%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_LSTM_joint_10min1500EvalTest_Seed2.png
+
+Entering LSTM Stage 1 (Detector) Training Loop
+Epoch [1/100] Train Loss: 0.6828
+Val Event P(macro [1]): 0.3507 | R: 0.7169 | F1: 0.4710
+Per-class P: [0.84003831 0.35074627]  R: [0.52831325 0.71694915]  F1: [0.64866864 0.47104677]
+Val Loss: 0.6495
+Epoch [2/100] Train Loss: 0.6189
+Val Event P(macro [1]): 0.3507 | R: 0.8072 | F1: 0.4890
+Per-class P: [0.87247758 0.35069956]  R: [0.4688253  0.80720339]  F1: [0.60991379 0.48896304]
+Val Loss: 0.6056
+Epoch [3/100] Train Loss: 0.6003
+Val Event P(macro [1]): 0.3279 | R: 0.9992 | F1: 0.4937
+Per-class P: [0.99889381 0.32786429]  R: [0.27198795 0.99915254]  F1: [0.42755682 0.49371859]
+Val Loss: 0.6342
+Epoch [4/100] Train Loss: 0.5972
+Val Event P(macro [1]): 0.3403 | R: 0.8881 | F1: 0.4920
+Per-class P: [0.90704225 0.34025974]  R: [0.38795181 0.88813559]  F1: [0.54345992 0.49201878]
+Val Loss: 0.6140
+Epoch [5/100] Train Loss: 0.5927
+Val Event P(macro [1]): 0.3418 | R: 0.8771 | F1: 0.4919
+Per-class P: [0.90149457 0.34180978]  R: [0.3996988  0.87711864]  F1: [0.55383973 0.49192015]
+Val Loss: 0.6060
+Epoch [6/100] Train Loss: 0.5930
+Val Event P(macro [1]): 0.3347 | R: 0.9411 | F1: 0.4938
+Per-class P: [0.94120135 0.33468957]  R: [0.33509036 0.94110169]  F1: [0.49422479 0.49377501]
+Val Loss: 0.6162
+Epoch [7/100] Train Loss: 0.5911
+Val Event P(macro [1]): 0.3375 | R: 0.9064 | F1: 0.4919
+Per-class P: [0.91701089 0.33754142]  R: [0.36777108 0.90635593]  F1: [0.52499194 0.49189376]
+Val Loss: 0.6063
+Epoch [8/100] Train Loss: 0.5921
+Val Event P(macro [1]): 0.3478 | R: 0.8229 | F1: 0.4889
+Per-class P: [0.87763466 0.34777937]  R: [0.45150602 0.82288136]  F1: [0.59626094 0.48892246]
+Val Loss: 0.5990
+Epoch [9/100] Train Loss: 0.5906
+Val Event P(macro [1]): 0.3500 | R: 0.8199 | F1: 0.4906
+Per-class P: [0.87759217 0.35003618]  R: [0.45888554 0.81991525]  F1: [0.60265032 0.49061866]
+Val Loss: 0.6010
+Epoch [10/100] Train Loss: 0.5907
+Val Event P(macro [1]): 0.3499 | R: 0.8225 | F1: 0.4909
+Per-class P: [0.87862109 0.3498558 ]  R: [0.45677711 0.82245763]  F1: [0.60107015 0.4908953 ]
+Val Loss: 0.5951
+Epoch [11/100] Train Loss: 0.5900
+Val Event P(macro [1]): 0.3361 | R: 0.9280 | F1: 0.4935
+Per-class P: [0.931562   0.33609576]  R: [0.34849398 0.9279661 ]  F1: [0.50723367 0.49346553]
+Val Loss: 0.6021
+Epoch [12/100] Train Loss: 0.5906
+Val Event P(macro [1]): 0.3399 | R: 0.8809 | F1: 0.4906
+Per-class P: [0.90256588 0.33992806]  R: [0.39201807 0.8809322 ]  F1: [0.54661907 0.49056159]
+Val Loss: 0.6034
+Epoch [13/100] Train Loss: 0.5903
+Val Event P(macro [1]): 0.3394 | R: 0.8962 | F1: 0.4923
+Per-class P: [0.91148844 0.33937741]  R: [0.37996988 0.89618644]  F1: [0.53635204 0.49231844]
+Val Loss: 0.6039
+Epoch [14/100] Train Loss: 0.5899
+Val Event P(macro [1]): 0.3285 | R: 0.9945 | F1: 0.4939
+Per-class P: [0.99299569 0.32852744]  R: [0.27756024 0.99449153]  F1: [0.43385122 0.49389731]
+Val Loss: 0.6083
+Epoch [15/100] Train Loss: 0.5891
+Val Event P(macro [1]): 0.3563 | R: 0.7047 | F1: 0.4732
+Per-class P: [0.83910434 0.35625536]  R: [0.54743976 0.70466102]  F1: [0.6625957  0.47324986]
+Val Loss: 0.5922
+Epoch [16/100] Train Loss: 0.5895
+Val Event P(macro [1]): 0.3388 | R: 0.8843 | F1: 0.4899
+Per-class P: [0.90387324 0.3387987 ]  R: [0.38659639 0.88432203]  F1: [0.54156118 0.4899061 ]
+Val Loss: 0.6026
+Epoch [17/100] Train Loss: 0.5894
+Val Event P(macro [1]): 0.3514 | R: 0.7945 | F1: 0.4873
+Per-class P: [0.867631   0.35138681]  R: [0.47876506 0.79449153]  F1: [0.61704193 0.48726611]
+Val Loss: 0.5937
+Epoch [18/100] Train Loss: 0.5900
+Val Event P(macro [1]): 0.3382 | R: 0.8966 | F1: 0.4912
+Per-class P: [0.91107872 0.33823529]  R: [0.37650602 0.89661017]  F1: [0.53282182 0.4911792 ]
+Val Loss: 0.6019
+Epoch [19/100] Train Loss: 0.5895
+Val Event P(macro [1]): 0.3389 | R: 0.8979 | F1: 0.4921
+Per-class P: [0.91229985 0.33893154]  R: [0.37756024 0.89788136]  F1: [0.53408607 0.49210404]
+Val Loss: 0.6099
+Epoch [20/100] Train Loss: 0.5900
+Val Event P(macro [1]): 0.3379 | R: 0.8928 | F1: 0.4902
+Per-class P: [0.90846599 0.33787684]  R: [0.37816265 0.89279661]  F1: [0.53402807 0.49022801]
+Val Loss: 0.6030
+Epoch [21/100] Train Loss: 0.5890
+Val Event P(macro [1]): 0.3510 | R: 0.8068 | F1: 0.4892
+Per-class P: [0.87248322 0.35103245]  R: [0.46987952 0.80677966]  F1: [0.61080658 0.48920863]
+Val Loss: 0.6007
+Epoch [22/100] Train Loss: 0.5881
+Val Event P(macro [1]): 0.3371 | R: 0.9072 | F1: 0.4915
+Per-class P: [0.91729607 0.33705919]  R: [0.36581325 0.90720339]  F1: [0.52304048 0.49150597]
+Val Loss: 0.6091
+Epoch [23/100] Train Loss: 0.5882
+Val Event P(macro [1]): 0.3511 | R: 0.8004 | F1: 0.4881
+Per-class P: [0.8698895  0.35111524]  R: [0.47424699 0.80042373]  F1: [0.61384016 0.4881137 ]
+Val Loss: 0.6000
+Epoch [24/100] Train Loss: 0.5881
+Val Event P(macro [1]): 0.3468 | R: 0.8275 | F1: 0.4887
+Per-class P: [0.87915677 0.34676847]  R: [0.44593373 0.82754237]  F1: [0.59172662 0.48873874]
+Val Loss: 0.5968
+Epoch [25/100] Train Loss: 0.5879
+Val Event P(macro [1]): 0.3493 | R: 0.8169 | F1: 0.4893
+Per-class P: [0.87586207 0.34927536]  R: [0.45903614 0.81694915]  F1: [0.60237154 0.4893401 ]
+Val Loss: 0.6053
+Early stopping triggered.
+Restored best weights from epoch 15 (best loss 0.5922, lowest val loss 0.5922).
+
+	Elapsed time is 23.8767 seconds.
+
+==========================================================================================
+Total parameters: 28586
+Total memory (bytes): 228688
+Total memory (MB): 0.2180938720703125
+==========================================================================================
+
+Entering LSTM Stage 2 (Type Classifier) Training Loop
+Epoch [1/100] Train Loss: 1.1010
+Val Event P(macro [0, 1, 2]): 0.2751 | R: 0.3364 | F1: 0.1653
+Per-class P: [0.         0.72955975 0.09559214]  R: [0.         0.20913462 0.8       ]  F1: [0.         0.32508174 0.17077799]
+Val Loss: 1.0984
+Epoch [2/100] Train Loss: 1.0999
+Val Event P(macro [0, 1, 2]): 0.1036 | R: 0.3519 | F1: 0.1600
+Per-class P: [0.21364452 0.         0.09724238]  R: [0.75796178 0.         0.29777778]  F1: [0.33333333 0.         0.14660832]
+Val Loss: 1.0980
+Epoch [3/100] Train Loss: 1.0999
+Val Event P(macro [0, 1, 2]): 0.0985 | R: 0.3340 | F1: 0.0595
+Per-class P: [0.2       0.        0.0955414]  R: [0.00212314 0.         1.        ]  F1: [0.00420168 0.         0.1744186 ]
+Val Loss: 1.0982
+Epoch [4/100] Train Loss: 1.0995
+Val Event P(macro [0, 1, 2]): 0.2351 | R: 0.3327 | F1: 0.2755
+Per-class P: [0.         0.70530786 0.        ]  R: [0.         0.99819712 0.        ]  F1: [0.         0.82657377 0.        ]
+Val Loss: 1.0989
+Epoch [5/100] Train Loss: 1.0993
+Val Event P(macro [0, 1, 2]): 0.3433 | R: 0.3420 | F1: 0.2909
+Per-class P: [0.21138211 0.72276029 0.09575626]  R: [0.27600849 0.35877404 0.39111111]  F1: [0.23941068 0.47951807 0.15384615]
+Val Loss: 1.0983
+Epoch [6/100] Train Loss: 1.0992
+Val Event P(macro [0, 1, 2]): 0.3525 | R: 0.3462 | F1: 0.1778
+Per-class P: [0.20775348 0.75423729 0.09565217]  R: [0.88747346 0.05348558 0.09777778]  F1: [0.33668949 0.09988777 0.0967033 ]
+Val Loss: 1.0984
+Epoch [7/100] Train Loss: 1.0991
+Val Event P(macro [0, 1, 2]): 0.2800 | R: 0.3321 | F1: 0.0724
+Per-class P: [0.         0.74509804 0.09484625]  R: [0.         0.02283654 0.97333333]  F1: [0.         0.04431487 0.17284925]
+Val Loss: 1.0983
+Epoch [8/100] Train Loss: 1.0993
+Val Event P(macro [0, 1, 2]): 0.2350 | R: 0.3333 | F1: 0.2757
+Per-class P: [0.         0.70508475 0.        ]  R: [0. 1. 0.]  F1: [0.         0.82703777 0.        ]
+Val Loss: 1.0986
+Epoch [9/100] Train Loss: 1.0988
+Val Event P(macro [0, 1, 2]): 0.3364 | R: 0.3358 | F1: 0.2480
+Per-class P: [0.21126761 0.7016129  0.0962963 ]  R: [0.06369427 0.36598558 0.57777778]  F1: [0.09787928 0.48104265 0.16507937]
+Val Loss: 1.0983
+Epoch [10/100] Train Loss: 1.0986
+Val Event P(macro [0, 1, 2]): 0.3334 | R: 0.3383 | F1: 0.2848
+Per-class P: [0.2        0.70080645 0.09948718]  R: [0.06157113 0.52223558 0.43111111]  F1: [0.09415584 0.59848485 0.16166667]
+Val Loss: 1.0983
+Epoch [11/100] Train Loss: 1.0987
+Val Event P(macro [0, 1, 2]): 0.3466 | R: 0.3525 | F1: 0.2307
+Per-class P: [0.211528   0.71890547 0.1092437 ]  R: [0.82590234 0.17367788 0.05777778]  F1: [0.33679654 0.27976767 0.0755814 ]
+Val Loss: 1.0984
+Epoch [12/100] Train Loss: 1.0987
+Val Event P(macro [0, 1, 2]): 0.3261 | R: 0.3279 | F1: 0.1551
+Per-class P: [0.20898876 0.67692308 0.09243697]  R: [0.19745223 0.05288462 0.73333333]  F1: [0.20305677 0.09810479 0.1641791 ]
+Val Loss: 1.0982
+Early stopping triggered.
+Restored best weights from epoch 2 (best loss 1.0980, lowest val loss 1.0980).
+
+	Elapsed time is 12.2177 seconds.
+
+==========================================================================================
+Total parameters: 28623
+Total memory (bytes): 228984
+Total memory (MB): 0.21837615966796875
+==========================================================================================
+
+LSTM Stage 2 (Type Classifier) Standalone Validation
+Accuracy: 17.31% (407/2351)
+Per-Class Accuracy:
+  Chemical: 74.02% (339/458)
+  Electric: 0.00% (0/1668)
+  Impulsive: 30.22% (68/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Chemical     0.2050    0.7402    0.3210       458
+    Electric     0.0000    0.0000    0.0000      1668
+   Impulsive     0.0976    0.3022    0.1475       225
+
+    accuracy                         0.1731      2351
+   macro avg     0.1008    0.3475    0.1562      2351
+weighted avg     0.0493    0.1731    0.0767      2351
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_Chemical  P_Electric  P_Impulsive
+T_Chemical          339           0          119
+T_Electric         1158           0          510
+T_Impulsive         157           0           68
+
+LSTM Cascade Evaluation
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         720    69.78%      21.81%
+Electric             225           0     0.00%         n/a
+Impulsive            225         224    13.78%      13.84%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_LSTM_cascade_10min1500EvalTest_Seed2.png
+
+--- Cascade Stage 1 (Detector) Standalone Metrics ---
+Accuracy: 58.39% (5255/9000)
+Per-Class Accuracy:
+  No Thrust: 54.59% (3630/6649)
+  Thrust: 69.12% (1625/2351)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8333    0.5459    0.6597      6649
+      Thrust     0.3499    0.6912    0.4646      2351
+
+    accuracy                         0.5839      9000
+   macro avg     0.5916    0.6186    0.5622      9000
+weighted avg     0.7071    0.5839    0.6087      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Thrust
+T_No Thrust         3630      3019
+T_Thrust             726      1625
+
+--- Cascade End-to-End (Stage1 -> Stage2 combined) Metrics ---
+Accuracy: 43.80% (3942/9000)
+Per-Class Accuracy:
+  No Thrust: 54.59% (3630/6649)
+  Chemical: 61.35% (281/458)
+  Electric: 0.00% (0/1668)
+  Impulsive: 13.78% (31/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8333    0.5459    0.6597      6649
+    Chemical     0.0767    0.6135    0.1363       458
+    Electric     0.0000    0.0000    0.0000      1668
+   Impulsive     0.0316    0.1378    0.0515       225
+
+    accuracy                         0.4380      9000
+   macro avg     0.2354    0.3243    0.2119      9000
+weighted avg     0.6203    0.4380    0.4956      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3630        2376           0          643
+T_Chemical           112         281           0           65
+T_Electric           532         895           0          241
+T_Impulsive           82         112           0           31
+
+Stage-2 type accuracy conditioned on correct stage-1 detection: 19.20% (1625 frames)
+Stage-1 (detector-only) accuracy: 58.39%
+
+LSTM Cascade Inference Time	Elapsed time is 0.6540 seconds.
+
+================================================================================
+Backbone: MAMBA
+================================================================================
+
+Entering MAMBA Joint (4-class) Training Loop
+Epoch [1/100] Train Loss: 1.3885
+Val Event P(macro [1, 2, 3]): 0.0772 | R: 0.3280 | F1: 0.1119
+Per-class P: [0.93333333 0.04285714 0.18878505 0.        ]  R: [0.04216867 0.01273885 0.97115385 0.        ]  F1: [0.08069164 0.01963993 0.31611894 0.        ]
+Val Loss: 1.3868
+Epoch [2/100] Train Loss: 1.3810
+Val Event P(macro [1, 2, 3]): 0.1016 | R: 0.2956 | F1: 0.1491
+Per-class P: [0.87209302 0.06379822 0.20786305 0.03308824]  R: [0.27108434 0.18259023 0.6640625  0.04      ]  F1: [0.41360294 0.09455745 0.31661891 0.0362173 ]
+Val Loss: 1.3750
+Epoch [3/100] Train Loss: 1.3636
+Val Event P(macro [1, 2, 3]): 0.1118 | R: 0.2694 | F1: 0.1371
+Per-class P: [0.8360035  0.07424907 0.21349206 0.04761905]  R: [0.43222892 0.4670913  0.32331731 0.01777778]  F1: [0.56984017 0.12813046 0.25717017 0.02588997]
+Val Loss: 1.3616
+Epoch [4/100] Train Loss: 1.3514
+Val Event P(macro [1, 2, 3]): 0.1151 | R: 0.2010 | F1: 0.1215
+Per-class P: [0.79815975 0.0806962  0.23357664 0.03111111]  R: [0.61400602 0.32484076 0.15384615 0.12444444]  F1: [0.69407559 0.12927757 0.18550725 0.04977778]
+Val Loss: 1.3370
+Epoch [5/100] Train Loss: 1.3419
+Val Event P(macro [1, 2, 3]): 0.1147 | R: 0.2439 | F1: 0.1250
+Per-class P: [0.82626706 0.08011869 0.23690987 0.02696793]  R: [0.51069277 0.40127389 0.16586538 0.16444444]  F1: [0.63123604 0.1335689  0.19512195 0.04633688]
+Val Loss: 1.3412
+Epoch [6/100] Train Loss: 1.3361
+Val Event P(macro [1, 2, 3]): 0.1170 | R: 0.2604 | F1: 0.1454
+Per-class P: [0.83674514 0.08095238 0.23982869 0.03024911]  R: [0.49246988 0.36093418 0.26923077 0.15111111]  F1: [0.62002275 0.13224426 0.25368063 0.05040771]
+Val Loss: 1.3379
+Epoch [7/100] Train Loss: 1.3323
+Val Event P(macro [1, 2, 3]): 0.1183 | R: 0.2419 | F1: 0.1465
+Per-class P: [0.82402235 0.07922912 0.24377593 0.03193833]  R: [0.53313253 0.31422505 0.28245192 0.12888889]  F1: [0.64740307 0.12654981 0.26169265 0.05119153]
+Val Loss: 1.3267
+Epoch [8/100] Train Loss: 1.3300
+Val Event P(macro [1, 2, 3]): 0.1112 | R: 0.2867 | F1: 0.1359
+Per-class P: [0.86964736 0.0728677  0.22801698 0.03258145]  R: [0.41596386 0.46072187 0.22596154 0.17333333]  F1: [0.56275469 0.12583357 0.22698461 0.05485232]
+Val Loss: 1.3429
+Epoch [9/100] Train Loss: 1.3276
+Val Event P(macro [1, 2, 3]): 0.1167 | R: 0.2591 | F1: 0.1278
+Per-class P: [0.83595335 0.07864742 0.24140893 0.03015873]  R: [0.49653614 0.43949045 0.16887019 0.16888889]  F1: [0.62301587 0.13341927 0.19872702 0.05117845]
+Val Loss: 1.3252
+Epoch [10/100] Train Loss: 1.3258
+Val Event P(macro [1, 2, 3]): 0.1175 | R: 0.2733 | F1: 0.1332
+Per-class P: [0.84662237 0.07689335 0.24466463 0.03091398]  R: [0.46054217 0.42250531 0.19290865 0.20444444]  F1: [0.59656652 0.13010788 0.21572581 0.05370695]
+Val Loss: 1.3327
+Epoch [11/100] Train Loss: 1.3245
+Val Event P(macro [1, 2, 3]): 0.1165 | R: 0.2869 | F1: 0.1118
+Per-class P: [0.86049884 0.07665505 0.24099723 0.03174603]  R: [0.44683735 0.56050955 0.10456731 0.19555556]  F1: [0.58822363 0.1348659  0.1458508  0.05462446]
+Val Loss: 1.3349
+Epoch [12/100] Train Loss: 1.3229
+Val Event P(macro [1, 2, 3]): 0.1180 | R: 0.2409 | F1: 0.1396
+Per-class P: [0.82697807 0.0779148  0.24571078 0.03025937]  R: [0.52259036 0.29511677 0.24098558 0.18666667]  F1: [0.64045773 0.1232816  0.24332524 0.05207688]
+Val Loss: 1.3169
+Epoch [13/100] Train Loss: 1.3213
+Val Event P(macro [1, 2, 3]): 0.1150 | R: 0.2753 | F1: 0.1378
+Per-class P: [0.8591224  0.07503556 0.240625   0.02935943]  R: [0.44819277 0.44798301 0.23137019 0.14666667]  F1: [0.58907363 0.12854097 0.23590686 0.04892513]
+Val Loss: 1.3349
+Epoch [14/100] Train Loss: 1.3208
+Val Event P(macro [1, 2, 3]): 0.1139 | R: 0.2674 | F1: 0.1184
+Per-class P: [0.85395189 0.07556591 0.239636   0.02640264]  R: [0.44909639 0.48195329 0.14242788 0.17777778]  F1: [0.58863008 0.13064748 0.17866566 0.04597701]
+Val Loss: 1.3330
+Epoch [15/100] Train Loss: 1.3197
+Val Event P(macro [1, 2, 3]): 0.1150 | R: 0.2462 | F1: 0.1130
+Per-class P: [0.82865657 0.0758392  0.23913043 0.03002309]  R: [0.50256024 0.38853503 0.11899038 0.23111111]  F1: [0.62566795 0.12690707 0.15890851 0.05314257]
+Val Loss: 1.3197
+Epoch [16/100] Train Loss: 1.3193
+Val Event P(macro [1, 2, 3]): 0.1164 | R: 0.2698 | F1: 0.1187
+Per-class P: [0.85016287 0.07866379 0.24115044 0.02948403]  R: [0.47168675 0.46496815 0.13100962 0.21333333]  F1: [0.60674157 0.13456221 0.16978193 0.05180788]
+Val Loss: 1.3219
+Epoch [17/100] Train Loss: 1.3183
+Val Event P(macro [1, 2, 3]): 0.1166 | R: 0.2847 | F1: 0.1317
+Per-class P: [0.86166812 0.07700535 0.24085851 0.03208556]  R: [0.44653614 0.45859873 0.18209135 0.21333333]  F1: [0.58823529 0.13186813 0.2073922  0.05578152]
+Val Loss: 1.3246
+Epoch [18/100] Train Loss: 1.3174
+Val Event P(macro [1, 2, 3]): 0.1145 | R: 0.2761 | F1: 0.1153
+Per-class P: [0.8566092  0.07765152 0.23842593 0.02755376]  R: [0.44894578 0.52229299 0.12379808 0.18222222]  F1: [0.58913043 0.13520198 0.16297468 0.04786924]
+Val Loss: 1.3259
+Epoch [19/100] Train Loss: 1.3151
+Val Event P(macro [1, 2, 3]): 0.1148 | R: 0.2824 | F1: 0.1200
+Per-class P: [0.8638098  0.07702182 0.23755187 0.02974223]  R: [0.44322289 0.50955414 0.13762019 0.2       ]  F1: [0.58584652 0.13381656 0.17427702 0.05178366]
+Val Loss: 1.3256
+Epoch [20/100] Train Loss: 1.3136
+Val Event P(macro [1, 2, 3]): 0.1155 | R: 0.2812 | F1: 0.1284
+Per-class P: [0.86593341 0.07825203 0.24092409 0.02717391]  R: [0.43870482 0.49044586 0.17548077 0.17777778]  F1: [0.58236705 0.13496933 0.20305981 0.04714202]
+Val Loss: 1.3290
+Epoch [21/100] Train Loss: 1.3137
+Val Event P(macro [1, 2, 3]): 0.1163 | R: 0.2717 | F1: 0.1252
+Per-class P: [0.85373216 0.07971014 0.24077491 0.02843915]  R: [0.4685241  0.4670913  0.15685096 0.19111111]  F1: [0.6050175  0.13618075 0.18995633 0.04951065]
+Val Loss: 1.3181
+Epoch [22/100] Train Loss: 1.3132
+Val Event P(macro [1, 2, 3]): 0.1154 | R: 0.2676 | F1: 0.1266
+Per-class P: [0.85158817 0.07944915 0.24061433 0.02604167]  R: [0.46837349 0.47770701 0.16947115 0.15555556]  F1: [0.6043529  0.13623978 0.19887165 0.0446144 ]
+Val Loss: 1.3182
+Early stopping triggered.
+Restored best weights from epoch 12 (best loss 1.3169, lowest val loss 1.3169).
+
+	Elapsed time is 43.3029 seconds.
+
+==========================================================================================
+Total parameters: 6106
+Total memory (bytes): 48848
+Total memory (MB): 0.0465850830078125
+==========================================================================================
+
+MAMBA Joint Validation
+Accuracy: 44.50% (4005/9000)
+Per-Class Accuracy:
+  No Thrust: 51.77% (3442/6649)
+  Chemical: 27.73% (127/458)
+  Electric: 23.74% (396/1668)
+  Impulsive: 17.78% (40/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8298    0.5177    0.6376      6649
+    Chemical     0.0707    0.2773    0.1127       458
+    Electric     0.2444    0.2374    0.2409      1668
+   Impulsive     0.0279    0.1778    0.0482       225
+
+    accuracy                         0.4450      9000
+   macro avg     0.2932    0.3025    0.2598      9000
+weighted avg     0.6626    0.4450    0.5226      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3442        1181        1044          982
+T_Chemical           121         127         120           90
+T_Electric           502         446         396          324
+T_Impulsive           83          42          60           40
+
+MAMBA Joint Inference Time	Elapsed time is 0.1226 seconds.
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         664    41.78%      14.16%
+Electric             225         784    75.56%      24.49%
+Impulsive            225         908    17.78%       4.41%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_MAMBA_joint_10min1500EvalTest_Seed2.png
+
+Entering MAMBA Stage 1 (Detector) Training Loop
+Epoch [1/100] Train Loss: 0.6916
+Val Event P(macro [1]): 0.2928 | R: 0.4669 | F1: 0.3599
+Per-class P: [0.75974026 0.29277365]  R: [0.59909639 0.46694915]  F1: [0.66992253 0.35989549]
+Val Loss: 0.6823
+Epoch [2/100] Train Loss: 0.6688
+Val Event P(macro [1]): 0.2988 | R: 0.7292 | F1: 0.4239
+Per-class P: [0.80277778 0.29878472]  R: [0.39171687 0.72923729]  F1: [0.52651822 0.42389163]
+Val Loss: 0.6536
+Epoch [3/100] Train Loss: 0.6500
+Val Event P(macro [1]): 0.3108 | R: 0.7568 | F1: 0.4407
+Per-class P: [0.82360172 0.31082492]  R: [0.40361446 0.75677966]  F1: [0.54174247 0.44066124]
+Val Loss: 0.6548
+Epoch [4/100] Train Loss: 0.6435
+Val Event P(macro [1]): 0.3400 | R: 0.6097 | F1: 0.4366
+Per-class P: [0.80683725 0.34002836]  R: [0.57936747 0.60974576]  F1: [0.67443899 0.43658981]
+Val Loss: 0.6417
+Epoch [5/100] Train Loss: 0.6402
+Val Event P(macro [1]): 0.3421 | R: 0.6801 | F1: 0.4552
+Per-class P: [0.82474466 0.34207161]  R: [0.53509036 0.68008475]  F1: [0.64906832 0.45519002]
+Val Loss: 0.6415
+Epoch [6/100] Train Loss: 0.6375
+Val Event P(macro [1]): 0.3546 | R: 0.5703 | F1: 0.4373
+Per-class P: [0.80514988 0.35458377]  R: [0.6310241  0.57033898]  F1: [0.70753124 0.43729695]
+Val Loss: 0.6348
+Epoch [7/100] Train Loss: 0.6351
+Val Event P(macro [1]): 0.3504 | R: 0.6343 | F1: 0.4514
+Per-class P: [0.81747039 0.35042135]  R: [0.58207831 0.63432203]  F1: [0.67997889 0.45144753]
+Val Loss: 0.6375
+Epoch [8/100] Train Loss: 0.6336
+Val Event P(macro [1]): 0.3453 | R: 0.5941 | F1: 0.4368
+Per-class P: [0.80607287 0.3453202 ]  R: [0.5996988 0.5940678]  F1: [0.68773748 0.43676012]
+Val Loss: 0.6330
+Epoch [9/100] Train Loss: 0.6320
+Val Event P(macro [1]): 0.3330 | R: 0.7394 | F1: 0.4592
+Per-class P: [0.83643617 0.33301527]  R: [0.47364458 0.73940678]  F1: [0.60480769 0.45921053]
+Val Loss: 0.6570
+Epoch [10/100] Train Loss: 0.6309
+Val Event P(macro [1]): 0.3461 | R: 0.6716 | F1: 0.4568
+Per-class P: [0.82466063 0.34606987]  R: [0.54894578 0.67161017]  F1: [0.65913201 0.45677233]
+Val Loss: 0.6373
+Epoch [11/100] Train Loss: 0.6304
+Val Event P(macro [1]): 0.3552 | R: 0.6852 | F1: 0.4679
+Per-class P: [0.83295863 0.35522847]  R: [0.55798193 0.68516949]  F1: [0.66829004 0.46788194]
+Val Loss: 0.6363
+Epoch [12/100] Train Loss: 0.6292
+Val Event P(macro [1]): 0.3506 | R: 0.6174 | F1: 0.4472
+Per-class P: [0.81358382 0.35057748]  R: [0.5935241  0.61737288]  F1: [0.68634622 0.44720688]
+Val Loss: 0.6308
+Epoch [13/100] Train Loss: 0.6277
+Val Event P(macro [1]): 0.3464 | R: 0.7445 | F1: 0.4728
+Per-class P: [0.84648676 0.34641167]  R: [0.50075301 0.74449153]  F1: [0.62925814 0.47282024]
+Val Loss: 0.6426
+Epoch [14/100] Train Loss: 0.6271
+Val Event P(macro [1]): 0.3487 | R: 0.7589 | F1: 0.4779
+Per-class P: [0.85274327 0.34871495]  R: [0.49623494 0.75889831]  F1: [0.62738005 0.47785486]
+Val Loss: 0.6409
+Epoch [15/100] Train Loss: 0.6266
+Val Event P(macro [1]): 0.3475 | R: 0.7297 | F1: 0.4707
+Per-class P: [0.84223541 0.34745763]  R: [0.51295181 0.72966102]  F1: [0.63758892 0.47074904]
+Val Loss: 0.6391
+Epoch [16/100] Train Loss: 0.6253
+Val Event P(macro [1]): 0.3497 | R: 0.6953 | F1: 0.4654
+Per-class P: [0.83310121 0.34974425]  R: [0.54051205 0.69533898]  F1: [0.65564487 0.46539989]
+Val Loss: 0.6304
+Epoch [17/100] Train Loss: 0.6252
+Val Event P(macro [1]): 0.3531 | R: 0.7038 | F1: 0.4703
+Per-class P: [0.8372905  0.35310374]  R: [0.54171687 0.70381356]  F1: [0.65782736 0.4702718 ]
+Val Loss: 0.6296
+Epoch [18/100] Train Loss: 0.6234
+Val Event P(macro [1]): 0.3427 | R: 0.7301 | F1: 0.4664
+Per-class P: [0.83962739 0.34268099]  R: [0.50225904 0.73008475]  F1: [0.62853374 0.46643205]
+Val Loss: 0.6347
+Epoch [19/100] Train Loss: 0.6233
+Val Event P(macro [1]): 0.3458 | R: 0.7267 | F1: 0.4686
+Per-class P: [0.84034653 0.34576613]  R: [0.51129518 0.72669492]  F1: [0.63576779 0.46857923]
+Val Loss: 0.6318
+Epoch [20/100] Train Loss: 0.6221
+Val Event P(macro [1]): 0.3506 | R: 0.6928 | F1: 0.4655
+Per-class P: [0.8327952  0.35055746]  R: [0.5438253  0.69279661]  F1: [0.65798105 0.4655467 ]
+Val Loss: 0.6278
+Epoch [21/100] Train Loss: 0.6203
+Val Event P(macro [1]): 0.3461 | R: 0.7814 | F1: 0.4797
+Per-class P: [0.85947712 0.3460961 ]  R: [0.4753012  0.78135593]  F1: [0.6121024  0.47970864]
+Val Loss: 0.6381
+Epoch [22/100] Train Loss: 0.6213
+Val Event P(macro [1]): 0.3504 | R: 0.6890 | F1: 0.4646
+Per-class P: [0.83165138 0.35043103]  R: [0.54608434 0.68898305]  F1: [0.65927273 0.46457143]
+Val Loss: 0.6228
+Epoch [23/100] Train Loss: 0.6207
+Val Event P(macro [1]): 0.3526 | R: 0.7017 | F1: 0.4694
+Per-class P: [0.83643123 0.35264055]  R: [0.54216867 0.70169492]  F1: [0.65789474 0.46938776]
+Val Loss: 0.6265
+Epoch [24/100] Train Loss: 0.6198
+Val Event P(macro [1]): 0.3481 | R: 0.7246 | F1: 0.4703
+Per-class P: [0.84099804 0.34812704]  R: [0.51777108 0.72457627]  F1: [0.6409396  0.47029703]
+Val Loss: 0.6276
+Epoch [25/100] Train Loss: 0.6197
+Val Event P(macro [1]): 0.3507 | R: 0.7644 | F1: 0.4808
+Per-class P: [0.85580913 0.35069984]  R: [0.49698795 0.76440678]  F1: [0.62881098 0.48081023]
+Val Loss: 0.6348
+Epoch [26/100] Train Loss: 0.6194
+Val Event P(macro [1]): 0.3472 | R: 0.7809 | F1: 0.4807
+Per-class P: [0.8599675  0.34721176]  R: [0.47816265 0.7809322 ]  F1: [0.61459543 0.48069901]
+Val Loss: 0.6380
+Epoch [27/100] Train Loss: 0.6185
+Val Event P(macro [1]): 0.3514 | R: 0.6945 | F1: 0.4667
+Per-class P: [0.83371771 0.35141509]  R: [0.54442771 0.69449153]  F1: [0.65870991 0.46668565]
+Val Loss: 0.6198
+Epoch [28/100] Train Loss: 0.6181
+Val Event P(macro [1]): 0.3533 | R: 0.7059 | F1: 0.4709
+Per-class P: [0.83800187 0.35326548]  R: [0.54066265 0.7059322 ]  F1: [0.6572684  0.47088751]
+Val Loss: 0.6225
+Epoch [29/100] Train Loss: 0.6184
+Val Event P(macro [1]): 0.3488 | R: 0.7343 | F1: 0.4730
+Per-class P: [0.84449405 0.34883253]  R: [0.5128012  0.73432203]  F1: [0.63811844 0.47298035]
+Val Loss: 0.6270
+Epoch [30/100] Train Loss: 0.6183
+Val Event P(macro [1]): 0.3495 | R: 0.7653 | F1: 0.4798
+Per-class P: [0.85542797 0.3494582 ]  R: [0.4936747  0.76525424]  F1: [0.62605042 0.47980871]
+Val Loss: 0.6335
+Epoch [31/100] Train Loss: 0.6175
+Val Event P(macro [1]): 0.3513 | R: 0.7390 | F1: 0.4762
+Per-class P: [0.84737364 0.35132957]  R: [0.51506024 0.73898305]  F1: [0.6406894  0.47624249]
+Val Loss: 0.6257
+Epoch [32/100] Train Loss: 0.6169
+Val Event P(macro [1]): 0.3479 | R: 0.7665 | F1: 0.4786
+Per-class P: [0.855      0.34788462]  R: [0.48930723 0.76652542]  F1: [0.62241379 0.47857143]
+Val Loss: 0.6274
+Epoch [33/100] Train Loss: 0.6171
+Val Event P(macro [1]): 0.3520 | R: 0.7737 | F1: 0.4838
+Per-class P: [0.85991605 0.35196608]  R: [0.4936747  0.77372881]  F1: [0.62724837 0.48383678]
+Val Loss: 0.6316
+Epoch [34/100] Train Loss: 0.6155
+Val Event P(macro [1]): 0.3522 | R: 0.7627 | F1: 0.4819
+Per-class P: [0.85600411 0.35218157]  R: [0.50135542 0.76271186]  F1: [0.63234875 0.4818632 ]
+Val Loss: 0.6264
+Epoch [35/100] Train Loss: 0.6147
+Val Event P(macro [1]): 0.3509 | R: 0.7398 | F1: 0.4760
+Per-class P: [0.84741551 0.35088424]  R: [0.51355422 0.73983051]  F1: [0.63953488 0.47600872]
+Val Loss: 0.6260
+Epoch [36/100] Train Loss: 0.6148
+Val Event P(macro [1]): 0.3493 | R: 0.7733 | F1: 0.4813
+Per-class P: [0.85831568 0.34934916]  R: [0.48810241 0.77330508]  F1: [0.62231183 0.48127637]
+Val Loss: 0.6270
+Epoch [37/100] Train Loss: 0.6150
+Val Event P(macro [1]): 0.3491 | R: 0.7958 | F1: 0.4853
+Per-class P: [0.86685083 0.34907063]  R: [0.47259036 0.79576271]  F1: [0.61169591 0.48527132]
+Val Loss: 0.6316
+Early stopping triggered.
+Restored best weights from epoch 27 (best loss 0.6198, lowest val loss 0.6198).
+
+	Elapsed time is 76.3298 seconds.
+
+==========================================================================================
+Total parameters: 6008
+Total memory (bytes): 48064
+Total memory (MB): 0.04583740234375
+==========================================================================================
+
+Entering MAMBA Stage 2 (Type Classifier) Training Loop
+Epoch [1/100] Train Loss: 1.1016
+Val Event P(macro [0, 1, 2]): 0.3350 | R: 0.3349 | F1: 0.2102
+Per-class P: [0.20296114 0.71042471 0.09166667]  R: [0.6985138  0.11057692 0.19555556]  F1: [0.31453155 0.19136765 0.1248227 ]
+Val Loss: 1.0989
+Epoch [2/100] Train Loss: 1.0997
+Val Event P(macro [0, 1, 2]): 0.3352 | R: 0.3403 | F1: 0.2501
+Per-class P: [0.20661765 0.70299145 0.09586466]  R: [0.59660297 0.19771635 0.22666667]  F1: [0.3069361  0.30863039 0.1347424 ]
+Val Loss: 1.0986
+Epoch [3/100] Train Loss: 1.0996
+Val Event P(macro [0, 1, 2]): 0.3376 | R: 0.3456 | F1: 0.2926
+Per-class P: [0.2062975  0.70280612 0.10381679]  R: [0.40339703 0.33112981 0.30222222]  F1: [0.27298851 0.4501634  0.15454545]
+Val Loss: 1.0984
+Epoch [4/100] Train Loss: 1.0992
+Val Event P(macro [0, 1, 2]): 0.3346 | R: 0.3384 | F1: 0.2780
+Per-class P: [0.20641283 0.70116618 0.09615385]  R: [0.4373673  0.2890625  0.28888889]  F1: [0.2804629  0.4093617  0.14428413]
+Val Loss: 1.0985
+Epoch [5/100] Train Loss: 1.0990
+Val Event P(macro [0, 1, 2]): 0.3388 | R: 0.3430 | F1: 0.2796
+Per-class P: [0.20806794 0.71005917 0.09838275]  R: [0.41613588 0.28846154 0.32444444]  F1: [0.27742392 0.41025641 0.15098242]
+Val Loss: 1.0983
+Epoch [6/100] Train Loss: 1.0988
+Val Event P(macro [0, 1, 2]): 0.3381 | R: 0.3426 | F1: 0.2710
+Per-class P: [0.2106383  0.70684039 0.09677419]  R: [0.42038217 0.26081731 0.34666667]  F1: [0.28065202 0.381036   0.15130941]
+Val Loss: 1.0982
+Epoch [7/100] Train Loss: 1.0985
+Val Event P(macro [0, 1, 2]): 0.3332 | R: 0.3337 | F1: 0.2722
+Per-class P: [0.20761671 0.69941349 0.09259259]  R: [0.35881104 0.28665865 0.35555556]  F1: [0.26303502 0.40664962 0.14692378]
+Val Loss: 1.0981
+Epoch [8/100] Train Loss: 1.0984
+Val Event P(macro [0, 1, 2]): 0.3305 | R: 0.3341 | F1: 0.2730
+Per-class P: [0.20412844 0.69230769 0.0951189 ]  R: [0.37791932 0.28665865 0.33777778]  F1: [0.26507818 0.40543986 0.1484375 ]
+Val Loss: 1.0978
+Epoch [9/100] Train Loss: 1.0980
+Val Event P(macro [0, 1, 2]): 0.3298 | R: 0.3301 | F1: 0.3078
+Per-class P: [0.2028754  0.69369369 0.09294872]  R: [0.26963907 0.46274038 0.25777778]  F1: [0.23154057 0.55515501 0.13663133]
+Val Loss: 1.0977
+Epoch [10/100] Train Loss: 1.0978
+Val Event P(macro [0, 1, 2]): 0.3311 | R: 0.3355 | F1: 0.2320
+Per-class P: [0.20255183 0.69518717 0.09562842]  R: [0.53927813 0.15625    0.31111111]  F1: [0.29449275 0.25515211 0.14629049]
+Val Loss: 1.0974
+Epoch [11/100] Train Loss: 1.0975
+Val Event P(macro [0, 1, 2]): 0.3357 | R: 0.3452 | F1: 0.2275
+Per-class P: [0.20783323 0.6993865  0.09977827]  R: [0.6985138  0.13701923 0.2       ]  F1: [0.32035054 0.22914573 0.13313609]
+Val Loss: 1.0974
+Epoch [12/100] Train Loss: 1.0971
+Val Event P(macro [0, 1, 2]): 0.3321 | R: 0.3381 | F1: 0.2481
+Per-class P: [0.20728083 0.69593148 0.09323583]  R: [0.59235669 0.1953125  0.22666667]  F1: [0.30709961 0.30502112 0.13212435]
+Val Loss: 1.0971
+Epoch [13/100] Train Loss: 1.0968
+Val Event P(macro [0, 1, 2]): 0.3273 | R: 0.3287 | F1: 0.2518
+Per-class P: [0.20168067 0.69172932 0.08863198]  R: [0.56050955 0.22115385 0.20444444]  F1: [0.29662921 0.33515483 0.12365591]
+Val Loss: 1.0969
+Epoch [14/100] Train Loss: 1.0964
+Val Event P(macro [0, 1, 2]): 0.3309 | R: 0.3388 | F1: 0.2551
+Per-class P: [0.2066787  0.68918919 0.09673025]  R: [0.48619958 0.21454327 0.31555556]  F1: [0.290057   0.32722273 0.14807091]
+Val Loss: 1.0965
+Epoch [15/100] Train Loss: 1.0964
+Val Event P(macro [0, 1, 2]): 0.3305 | R: 0.3379 | F1: 0.2380
+Per-class P: [0.20496084 0.69138756 0.09512195]  R: [0.66666667 0.17367788 0.17333333]  F1: [0.31352971 0.27761768 0.12283465]
+Val Loss: 1.0962
+Epoch [16/100] Train Loss: 1.0959
+Val Event P(macro [0, 1, 2]): 0.3289 | R: 0.3365 | F1: 0.2428
+Per-class P: [0.20548862 0.68859649 0.09268293]  R: [0.65180467 0.18870192 0.16888889]  F1: [0.31246819 0.29622642 0.11968504]
+Val Loss: 1.0963
+Epoch [17/100] Train Loss: 1.0954
+Val Event P(macro [0, 1, 2]): 0.3294 | R: 0.3368 | F1: 0.2502
+Per-class P: [0.2073255  0.69047619 0.09046455]  R: [0.63694268 0.20913462 0.16444444]  F1: [0.31282586 0.32103321 0.11671924]
+Val Loss: 1.0962
+Epoch [18/100] Train Loss: 1.0956
+Val Event P(macro [0, 1, 2]): 0.3345 | R: 0.3442 | F1: 0.2412
+Per-class P: [0.21007194 0.69651741 0.09683099]  R: [0.61995754 0.16826923 0.24444444]  F1: [0.31380978 0.27105518 0.13871375]
+Val Loss: 1.0961
+Epoch [19/100] Train Loss: 1.0946
+Val Event P(macro [0, 1, 2]): 0.3288 | R: 0.3365 | F1: 0.2645
+Per-class P: [0.20616114 0.68561873 0.09475806]  R: [0.55414013 0.24639423 0.20888889]  F1: [0.30051813 0.36251105 0.13037448]
+Val Loss: 1.0963
+Epoch [20/100] Train Loss: 1.0947
+Val Event P(macro [0, 1, 2]): 0.3281 | R: 0.3330 | F1: 0.2492
+Per-class P: [0.20830008 0.6875     0.08837971]  R: [0.55414013 0.20492788 0.24      ]  F1: [0.30278422 0.31574074 0.1291866 ]
+Val Loss: 1.0965
+Epoch [21/100] Train Loss: 1.0937
+Val Event P(macro [0, 1, 2]): 0.3310 | R: 0.3373 | F1: 0.2676
+Per-class P: [0.20783373 0.69218241 0.09292929]  R: [0.55201699 0.25540865 0.20444444]  F1: [0.30197445 0.37313433 0.12777778]
+Val Loss: 1.0965
+Epoch [22/100] Train Loss: 1.0936
+Val Event P(macro [0, 1, 2]): 0.3374 | R: 0.3429 | F1: 0.2713
+Per-class P: [0.21575649 0.70431894 0.09204368]  R: [0.51167728 0.25480769 0.26222222]  F1: [0.30352645 0.37422771 0.13625866]
+Val Loss: 1.0962
+Epoch [23/100] Train Loss: 1.0938
+Val Event P(macro [0, 1, 2]): 0.3327 | R: 0.3406 | F1: 0.2472
+Per-class P: [0.2093207  0.6940133  0.09486781]  R: [0.5626327  0.18810096 0.27111111]  F1: [0.30512378 0.29598109 0.140553  ]
+Val Loss: 1.0963
+Epoch [24/100] Train Loss: 1.0920
+Val Event P(macro [0, 1, 2]): 0.3357 | R: 0.3414 | F1: 0.2605
+Per-class P: [0.21083032 0.70588235 0.09048724]  R: [0.61995754 0.23076923 0.17333333]  F1: [0.31465517 0.34782609 0.11890244]
+Val Loss: 1.0968
+Epoch [25/100] Train Loss: 1.0917
+Val Event P(macro [0, 1, 2]): 0.3383 | R: 0.3422 | F1: 0.2573
+Per-class P: [0.21033479 0.71259843 0.09205021]  R: [0.61358811 0.21754808 0.19555556]  F1: [0.31327913 0.33333333 0.12517781]
+Val Loss: 1.0970
+Epoch [26/100] Train Loss: 1.0920
+Val Event P(macro [0, 1, 2]): 0.3382 | R: 0.3410 | F1: 0.2580
+Per-class P: [0.2091402  0.71232877 0.09318996]  R: [0.57324841 0.21875    0.23111111]  F1: [0.30646992 0.33471264 0.13282248]
+Val Loss: 1.0969
+Epoch [27/100] Train Loss: 1.0908
+Val Event P(macro [0, 1, 2]): 0.3401 | R: 0.3424 | F1: 0.2630
+Per-class P: [0.21060966 0.716946   0.09285714]  R: [0.56475584 0.23137019 0.23111111]  F1: [0.30680507 0.34984098 0.13248408]
+Val Loss: 1.0969
+Epoch [28/100] Train Loss: 1.0907
+Val Event P(macro [0, 1, 2]): 0.3365 | R: 0.3350 | F1: 0.2560
+Per-class P: [0.20771046 0.71428571 0.08756567]  R: [0.56050955 0.22235577 0.22222222]  F1: [0.30309989 0.33913841 0.12562814]
+Val Loss: 1.0970
+Early stopping triggered.
+Restored best weights from epoch 18 (best loss 1.0961, lowest val loss 1.0961).
+
+	Elapsed time is 56.8815 seconds.
+
+==========================================================================================
+Total parameters: 6057
+Total memory (bytes): 48456
+Total memory (MB): 0.04621124267578125
+==========================================================================================
+
+MAMBA Stage 2 (Type Classifier) Standalone Validation
+Accuracy: 27.90% (656/2351)
+Per-Class Accuracy:
+  Chemical: 55.24% (253/458)
+  Electric: 20.38% (340/1668)
+  Impulsive: 28.00% (63/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Chemical     0.2011    0.5524    0.2949       458
+    Electric     0.6911    0.2038    0.3148      1668
+   Impulsive     0.1048    0.2800    0.1525       225
+
+    accuracy                         0.2790      2351
+   macro avg     0.3323    0.3454    0.2541      2351
+weighted avg     0.5395    0.2790    0.2954      2351
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_Chemical  P_Electric  P_Impulsive
+T_Chemical          253         105          100
+T_Electric          890         340          438
+T_Impulsive         115          47           63
+
+MAMBA Cascade Evaluation
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         692    52.00%      17.05%
+Electric             225         423    44.89%      24.11%
+Impulsive            225         572    12.00%       4.72%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_MAMBA_cascade_10min1500EvalTest_Seed2.png
+
+--- Cascade Stage 1 (Detector) Standalone Metrics ---
+Accuracy: 57.82% (5204/9000)
+Per-Class Accuracy:
+  No Thrust: 54.25% (3607/6649)
+  Thrust: 67.93% (1597/2351)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8271    0.5425    0.6552      6649
+      Thrust     0.3443    0.6793    0.4569      2351
+
+    accuracy                         0.5782      9000
+   macro avg     0.5857    0.6109    0.5561      9000
+weighted avg     0.7010    0.5782    0.6034      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Thrust
+T_No Thrust         3607      3042
+T_Thrust             754      1597
+
+--- Cascade End-to-End (Stage1 -> Stage2 combined) Metrics ---
+Accuracy: 45.12% (4061/9000)
+Per-Class Accuracy:
+  No Thrust: 54.25% (3607/6649)
+  Chemical: 41.92% (192/458)
+  Electric: 14.09% (235/1668)
+  Impulsive: 12.00% (27/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8271    0.5425    0.6552      6649
+    Chemical     0.0713    0.4192    0.1219       458
+    Electric     0.2440    0.1409    0.1786      1668
+   Impulsive     0.0274    0.1200    0.0447       225
+
+    accuracy                         0.4512      9000
+   macro avg     0.2925    0.3056    0.2501      9000
+weighted avg     0.6606    0.4512    0.5245      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3607        1748         618          676
+T_Chemical           128         192          80           58
+T_Electric           541         669         235          223
+T_Impulsive           85          83          30           27
+
+Stage-2 type accuracy conditioned on correct stage-1 detection: 28.43% (1597 frames)
+Stage-1 (detector-only) accuracy: 57.82%
+
+MAMBA Cascade Inference Time	Elapsed time is 0.6590 seconds.
+
+================================================================================
+Backbone: TRANSFORMER
+================================================================================
+
+Entering TRANSFORMER Joint (4-class) Training Loop
+Epoch [1/100] Train Loss: 1.3741
+Val Event P(macro [1, 2, 3]): 0.1135 | R: 0.3518 | F1: 0.1459
+Per-class P: [0.98590814 0.07876712 0.22933468 0.03239529]  R: [0.28448795 0.3418259  0.2734375  0.44      ]  F1: [0.44156148 0.12803181 0.24945175 0.06034746]
+Val Loss: 1.3038
+Epoch [2/100] Train Loss: 1.3081
+Val Event P(macro [1, 2, 3]): 0.1190 | R: 0.3418 | F1: 0.0974
+Per-class P: [0.98284823 0.07745399 0.24807692 0.0314166 ]  R: [0.28478916 0.21443737 0.07752404 0.73333333]  F1: [0.44161607 0.11380282 0.11813187 0.06025196]
+Val Loss: 1.2983
+Epoch [3/100] Train Loss: 1.2960
+Val Event P(macro [1, 2, 3]): 0.1138 | R: 0.3620 | F1: 0.1486
+Per-class P: [1.         0.07235529 0.23320158 0.0359589 ]  R: [0.27108434 0.61571125 0.28365385 0.18666667]  F1: [0.42654028 0.12949319 0.25596529 0.06030151]
+Val Loss: 1.2890
+Epoch [4/100] Train Loss: 1.2917
+Val Event P(macro [1, 2, 3]): 0.1180 | R: 0.3659 | F1: 0.1700
+Per-class P: [0.98989362 0.07934509 0.23819124 0.03640777]  R: [0.28027108 0.26751592 0.49699519 0.33333333]  F1: [0.43685446 0.12238951 0.3220405  0.06564551]
+Val Loss: 1.2877
+Epoch [5/100] Train Loss: 1.2923
+Val Event P(macro [1, 2, 3]): 0.1129 | R: 0.3667 | F1: 0.0897
+Per-class P: [1.         0.07907706 0.23101266 0.0285124 ]  R: [0.27108434 0.74946921 0.04387019 0.30666667]  F1: [0.42654028 0.14305978 0.07373737 0.05217391]
+Val Loss: 1.2879
+Epoch [6/100] Train Loss: 1.2879
+Val Event P(macro [1, 2, 3]): 0.1225 | R: 0.3467 | F1: 0.0950
+Per-class P: [0.99779249 0.09198113 0.24382716 0.03172008]  R: [0.27228916 0.08280255 0.09495192 0.86222222]  F1: [0.42782773 0.08715084 0.1366782  0.06118909]
+Val Loss: 1.2735
+Epoch [7/100] Train Loss: 1.2886
+Val Event P(macro [1, 2, 3]): 0.1160 | R: 0.3508 | F1: 0.0707
+Per-class P: [0.99669604 0.07899461 0.23809524 0.03078818]  R: [0.27259036 0.37367304 0.01201923 0.66666667]  F1: [0.42809839 0.13041867 0.0228833  0.05885815]
+Val Loss: 1.2837
+Epoch [8/100] Train Loss: 1.2884
+Val Event P(macro [1, 2, 3]): 0.1263 | R: 0.3465 | F1: 0.1592
+Per-class P: [1.         0.10897436 0.2390928  0.0307571 ]  R: [0.27108434 0.03609342 0.82992788 0.17333333]  F1: [0.42654028 0.05422648 0.37123656 0.0522438 ]
+Val Loss: 1.2770
+Epoch [9/100] Train Loss: 1.2859
+Val Event P(macro [1, 2, 3]): 0.1173 | R: 0.3455 | F1: 0.1737
+Per-class P: [0.97920892 0.083      0.23581135 0.03320312]  R: [0.29081325 0.17622081 0.70913462 0.15111111]  F1: [0.44844403 0.1128484  0.35392921 0.05444355]
+Val Loss: 1.2717
+Epoch [10/100] Train Loss: 1.2855
+Val Event P(macro [1, 2, 3]): 0.1083 | R: 0.3400 | F1: 0.0907
+Per-class P: [0.92515432 0.07759273 0.21717172 0.03021978]  R: [0.36114458 0.87048832 0.05168269 0.09777778]  F1: [0.5194974  0.1424848  0.08349515 0.04616999]
+Val Loss: 1.2690
+Epoch [11/100] Train Loss: 1.2862
+Val Event P(macro [1, 2, 3]): 0.1150 | R: 0.3623 | F1: 0.0956
+Per-class P: [0.98247423 0.07687225 0.2375     0.03066038]  R: [0.28704819 0.74097665 0.05709135 0.28888889]  F1: [0.44428904 0.13929355 0.09205426 0.0554371 ]
+Val Loss: 1.2756
+Epoch [12/100] Train Loss: 1.2844
+Val Event P(macro [1, 2, 3]): 0.1171 | R: 0.3519 | F1: 0.1647
+Per-class P: [1.         0.07486631 0.24415056 0.03214286]  R: [0.27108434 0.11889597 0.57692308 0.36      ]  F1: [0.42654028 0.09187859 0.34310222 0.05901639]
+Val Loss: 1.2811
+Epoch [13/100] Train Loss: 1.2848
+Val Event P(macro [1, 2, 3]): 0.1136 | R: 0.3801 | F1: 0.0720
+Per-class P: [1.         0.08054299 0.22916667 0.03111274]  R: [0.27108434 0.75583864 0.00661058 0.37777778]  F1: [0.42654028 0.1455735  0.01285047 0.0574907 ]
+Val Loss: 1.2751
+Epoch [14/100] Train Loss: 1.2840
+Val Event P(macro [1, 2, 3]): 0.1069 | R: 0.3778 | F1: 0.1263
+Per-class P: [1.         0.07958333 0.20873016 0.03245614]  R: [0.27108434 0.81104034 0.15805288 0.16444444]  F1: [0.42654028 0.14494403 0.17989056 0.05421245]
+Val Loss: 1.2908
+Epoch [15/100] Train Loss: 1.2840
+Val Event P(macro [1, 2, 3]): 0.1172 | R: 0.3506 | F1: 0.0755
+Per-class P: [0.92307692 0.07858814 0.23958333 0.03338762]  R: [0.35421687 0.85562633 0.01382212 0.18222222]  F1: [0.51197214 0.14395428 0.02613636 0.05643496]
+Val Loss: 1.2646
+Epoch [16/100] Train Loss: 1.2840
+Val Event P(macro [1, 2, 3]): 0.0364 | R: 0.3803 | F1: 0.0663
+Per-class P: [1.         0.07726597 0.         0.03193833]  R: [0.27108434 0.88322718 0.         0.25777778]  F1: [0.42654028 0.14210077 0.         0.05683488]
+Val Loss: 1.2724
+Epoch [17/100] Train Loss: 1.2846
+Val Event P(macro [1, 2, 3]): 0.1198 | R: 0.3728 | F1: 0.1550
+Per-class P: [1.         0.08554965 0.242      0.03192935]  R: [0.27108434 0.40976645 0.29086538 0.41777778]  F1: [0.42654028 0.14154749 0.26419214 0.05932471]
+Val Loss: 1.2742
+Epoch [18/100] Train Loss: 1.2821
+Val Event P(macro [1, 2, 3]): 0.1092 | R: 0.3449 | F1: 0.0745
+Per-class P: [1.         0.04545455 0.25       0.03224299]  R: [0.27108434 0.00424628 0.11057692 0.92      ]  F1: [0.42654028 0.00776699 0.15333333 0.06230248]
+Val Loss: 1.2754
+Epoch [19/100] Train Loss: 1.2830
+Val Event P(macro [1, 2, 3]): 0.0363 | R: 0.3796 | F1: 0.0661
+Per-class P: [1.         0.07722222 0.         0.03166667]  R: [0.27108434 0.88535032 0.         0.25333333]  F1: [0.42654028 0.14205416 0.         0.0562963 ]
+Val Loss: 1.2834
+Epoch [20/100] Train Loss: 1.2832
+Val Event P(macro [1, 2, 3]): 0.1005 | R: 0.3719 | F1: 0.0678
+Per-class P: [1.         0.07763975 0.19444444 0.02932406]  R: [0.27108434 0.8492569  0.00420673 0.26222222]  F1: [0.42654028 0.14227281 0.00823529 0.05274922]
+Val Loss: 1.2793
+Epoch [21/100] Train Loss: 1.2817
+Val Event P(macro [1, 2, 3]): 0.1031 | R: 0.3448 | F1: 0.1585
+Per-class P: [1.         0.08260234 0.22668038 0.        ]  R: [0.27108434 0.23991507 0.79447115 0.        ]  F1: [0.42654028 0.12289288 0.35272145 0.        ]
+Val Loss: 1.2922
+Epoch [22/100] Train Loss: 1.2814
+Val Event P(macro [1, 2, 3]): 0.1168 | R: 0.3671 | F1: 0.1053
+Per-class P: [0.95491803 0.07897436 0.23809524 0.03347578]  R: [0.31581325 0.81740977 0.07512019 0.20888889]  F1: [0.47464916 0.14403292 0.1142074  0.05770411]
+Val Loss: 1.2661
+Epoch [23/100] Train Loss: 1.2801
+Val Event P(macro [1, 2, 3]): 0.1209 | R: 0.3473 | F1: 0.1629
+Per-class P: [0.99672489 0.0890411  0.24311024 0.03062361]  R: [0.275      0.0552017  0.7421875  0.24444444]  F1: [0.43106704 0.06815203 0.36625148 0.0544285 ]
+Val Loss: 1.2701
+Epoch [24/100] Train Loss: 1.2810
+Val Event P(macro [1, 2, 3]): 0.1123 | R: 0.3785 | F1: 0.1394
+Per-class P: [1.         0.0796729  0.22391858 0.03338279]  R: [0.27108434 0.72399151 0.21153846 0.2       ]  F1: [0.42654028 0.14354873 0.21755253 0.05721551]
+Val Loss: 1.2836
+Epoch [25/100] Train Loss: 1.2808
+Val Event P(macro [1, 2, 3]): 0.0898 | R: 0.3695 | F1: 0.0691
+Per-class P: [0.97878788 0.07722222 0.16071429 0.03132992]  R: [0.29186747 0.88535032 0.00540865 0.21777778]  F1: [0.44965197 0.14205416 0.01046512 0.05477921]
+Val Loss: 1.2793
+Early stopping triggered.
+Restored best weights from epoch 15 (best loss 1.2646, lowest val loss 1.2646).
+
+	Elapsed time is 31.6797 seconds.
+
+==========================================================================================
+Total parameters: 212996
+Total memory (bytes): 1703968
+Total memory (MB): 1.625030517578125
+==========================================================================================
+
+TRANSFORMER Joint Validation
+Accuracy: 31.79% (2861/9000)
+Per-Class Accuracy:
+  No Thrust: 36.46% (2424/6649)
+  Chemical: 82.75% (379/458)
+  Electric: 1.26% (21/1668)
+  Impulsive: 16.44% (37/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.9238    0.3646    0.5228      6649
+    Chemical     0.0736    0.8275    0.1351       458
+    Electric     0.2500    0.0126    0.0240      1668
+   Impulsive     0.0325    0.1644    0.0542       225
+
+    accuracy                         0.3179      9000
+   macro avg     0.3200    0.3423    0.1840      9000
+weighted avg     0.7334    0.3179    0.3989      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         2424        3354          52          819
+T_Chemical            20         379           6           53
+T_Electric           154        1262          21          231
+T_Impulsive           26         157           5           37
+
+TRANSFORMER Joint Inference Time	Elapsed time is 0.0642 seconds.
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         900    90.67%      22.67%
+Electric             225          84     9.33%      25.00%
+Impulsive            225        1004    16.44%       3.69%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_TRANSFORMER_joint_10min1500EvalTest_Seed2.png
+
+Entering TRANSFORMER Stage 1 (Detector) Training Loop
+Epoch [1/100] Train Loss: 0.6506
+Val Event P(macro [1]): 0.3594 | R: 0.3369 | F1: 0.3478
+Per-class P: [0.76944608 0.35940325]  R: [0.78659639 0.33686441]  F1: [0.77792672 0.34776903]
+Val Loss: 0.6009
+Epoch [2/100] Train Loss: 0.6019
+Val Event P(macro [1]): 0.3296 | R: 0.9665 | F1: 0.4916
+Per-class P: [0.96201923 0.32962428]  R: [0.30135542 0.96652542]  F1: [0.45894495 0.49159483]
+Val Loss: 0.6262
+Epoch [3/100] Train Loss: 0.5947
+Val Event P(macro [1]): 0.3311 | R: 0.9847 | F1: 0.4955
+Per-class P: [0.98181818 0.33105413]  R: [0.29277108 0.98474576]  F1: [0.45104408 0.49552239]
+Val Loss: 0.6366
+Epoch [4/100] Train Loss: 0.5935
+Val Event P(macro [1]): 0.3459 | R: 0.8360 | F1: 0.4893
+Per-class P: [0.88258495 0.34589762]  R: [0.43810241 0.83601695]  F1: [0.5855475  0.48933532]
+Val Loss: 0.5965
+Epoch [5/100] Train Loss: 0.5916
+Val Event P(macro [1]): 0.3365 | R: 0.9301 | F1: 0.4941
+Per-class P: [0.93336026 0.33645003]  R: [0.34804217 0.93008475]  F1: [0.50702062 0.49414678]
+Val Loss: 0.6044
+Epoch [6/100] Train Loss: 0.5907
+Val Event P(macro [1]): 0.3287 | R: 0.9860 | F1: 0.4930
+Per-class P: [0.9828125  0.32867232]  R: [0.28418675 0.98601695]  F1: [0.44088785 0.49300847]
+Val Loss: 0.6162
+Epoch [7/100] Train Loss: 0.5912
+Val Event P(macro [1]): 0.3336 | R: 0.9314 | F1: 0.4913
+Per-class P: [0.93283582 0.33363692]  R: [0.33885542 0.93135593]  F1: [0.49712771 0.49128297]
+Val Loss: 0.6039
+Epoch [8/100] Train Loss: 0.5910
+Val Event P(macro [1]): 0.3314 | R: 0.9627 | F1: 0.4931
+Per-class P: [0.95897436 0.33143691]  R: [0.30978916 0.96271186]  F1: [0.46829824 0.49310906]
+Val Loss: 0.6092
+Epoch [9/100] Train Loss: 0.5916
+Val Event P(macro [1]): 0.3344 | R: 0.9148 | F1: 0.4898
+Per-class P: [0.92099057 0.3344176 ]  R: [0.35286145 0.91483051]  F1: [0.51023519 0.48979129]
+Val Loss: 0.6059
+Epoch [10/100] Train Loss: 0.5894
+Val Event P(macro [1]): 0.3528 | R: 0.7894 | F1: 0.4877
+Per-class P: [0.86639785 0.35284091]  R: [0.48539157 0.78940678]  F1: [0.62220077 0.48769634]
+Val Loss: 0.5882
+Epoch [11/100] Train Loss: 0.5904
+Val Event P(macro [1]): 0.3390 | R: 0.9089 | F1: 0.4938
+Per-class P: [0.91953593 0.33896966]  R: [0.37003012 0.90889831]  F1: [0.52770619 0.49378453]
+Val Loss: 0.6054
+Epoch [12/100] Train Loss: 0.5897
+Val Event P(macro [1]): 0.3376 | R: 0.8932 | F1: 0.4900
+Per-class P: [0.90856313 0.3376041 ]  R: [0.37710843 0.89322034]  F1: [0.53299276 0.49000465]
+Val Loss: 0.6034
+Epoch [13/100] Train Loss: 0.5905
+Val Event P(macro [1]): 0.3432 | R: 0.8597 | F1: 0.4906
+Per-class P: [0.89281088 0.34320027]  R: [0.41521084 0.85974576]  F1: [0.56681743 0.4905706 ]
+Val Loss: 0.6042
+Epoch [14/100] Train Loss: 0.5894
+Val Event P(macro [1]): 0.3278 | R: 1.0000 | F1: 0.4937
+Per-class P: [1.         0.32777778]  R: [0.27108434 1.        ]  F1: [0.42654028 0.49372385]
+Val Loss: 0.6129
+Epoch [15/100] Train Loss: 0.5895
+Val Event P(macro [1]): 0.3278 | R: 1.0000 | F1: 0.4937
+Per-class P: [1.         0.32777778]  R: [0.27108434 1.        ]  F1: [0.42654028 0.49372385]
+Val Loss: 0.6126
+Epoch [16/100] Train Loss: 0.5898
+Val Event P(macro [1]): 0.3392 | R: 0.9042 | F1: 0.4933
+Per-class P: [0.91654357 0.33916084]  R: [0.37379518 0.90423729]  F1: [0.53102268 0.49329635]
+Val Loss: 0.6020
+Epoch [17/100] Train Loss: 0.5888
+Val Event P(macro [1]): 0.3461 | R: 0.8576 | F1: 0.4932
+Per-class P: [0.89340102 0.34610123]  R: [0.42409639 0.85762712]  F1: [0.5751634  0.49317739]
+Val Loss: 0.6021
+Epoch [18/100] Train Loss: 0.5888
+Val Event P(macro [1]): 0.3366 | R: 0.9242 | F1: 0.4934
+Per-class P: [0.92896825 0.33657407]  R: [0.35256024 0.92415254]  F1: [0.51113537 0.49343891]
+Val Loss: 0.6057
+Epoch [19/100] Train Loss: 0.5878
+Val Event P(macro [1]): 0.3517 | R: 0.8047 | F1: 0.4894
+Per-class P: [0.87194444 0.35166667]  R: [0.47274096 0.80466102]  F1: [0.61308594 0.48943299]
+Val Loss: 0.5903
+Epoch [20/100] Train Loss: 0.5888
+Val Event P(macro [1]): 0.3278 | R: 1.0000 | F1: 0.4937
+Per-class P: [1.         0.32777778]  R: [0.27108434 1.        ]  F1: [0.42654028 0.49372385]
+Val Loss: 0.6151
+Early stopping triggered.
+Restored best weights from epoch 10 (best loss 0.5882, lowest val loss 0.5882).
+
+	Elapsed time is 25.8267 seconds.
+
+==========================================================================================
+Total parameters: 212898
+Total memory (bytes): 1703184
+Total memory (MB): 1.6242828369140625
+==========================================================================================
+
+Entering TRANSFORMER Stage 2 (Type Classifier) Training Loop
+Epoch [1/100] Train Loss: 1.1245
+Val Event P(macro [0, 1, 2]): 0.3427 | R: 0.3449 | F1: 0.3018
+Per-class P: [0.2128655  0.71864009 0.09662577]  R: [0.38641189 0.36838942 0.28      ]  F1: [0.2745098  0.4870878  0.14367161]
+Val Loss: 1.1118
+Epoch [2/100] Train Loss: 1.1130
+Val Event P(macro [0, 1, 2]): 0.3380 | R: 0.3396 | F1: 0.3230
+Per-class P: [0.21361502 0.70188679 0.09852217]  R: [0.19320594 0.55889423 0.26666667]  F1: [0.20289855 0.6222817  0.14388489]
+Val Loss: 1.1216
+Epoch [3/100] Train Loss: 1.1077
+Val Event P(macro [0, 1, 2]): 0.3291 | R: 0.3442 | F1: 0.2427
+Per-class P: [0.17857143 0.70779862 0.10083397]  R: [0.01061571 0.43088942 0.59111111]  F1: [0.02004008 0.53567426 0.17227979]
+Val Loss: 1.0990
+Epoch [4/100] Train Loss: 1.1060
+Val Event P(macro [0, 1, 2]): 0.3646 | R: 0.3585 | F1: 0.2841
+Per-class P: [0.21386909 0.7219973  0.15789474]  R: [0.70063694 0.32151442 0.05333333]  F1: [0.32770606 0.44490644 0.07973422]
+Val Loss: 1.1034
+Epoch [5/100] Train Loss: 1.1047
+Val Event P(macro [0, 1, 2]): 0.3559 | R: 0.3688 | F1: 0.3210
+Per-class P: [0.22956235 0.72240086 0.11574074]  R: [0.59023355 0.40504808 0.11111111]  F1: [0.33055886 0.51906045 0.11337868]
+Val Loss: 1.0963
+Epoch [6/100] Train Loss: 1.1017
+Val Event P(macro [0, 1, 2]): 0.3427 | R: 0.3553 | F1: 0.2570
+Per-class P: [0.22026432 0.70308483 0.10479705]  R: [0.10615711 0.32872596 0.63111111]  F1: [0.14326648 0.44799345 0.17974684]
+Val Loss: 1.0914
+Epoch [7/100] Train Loss: 1.1037
+Val Event P(macro [0, 1, 2]): 0.3551 | R: 0.3757 | F1: 0.2082
+Per-class P: [0.22397661 0.72972973 0.11155378]  R: [0.81316348 0.06490385 0.24888889]  F1: [0.35121504 0.1192053  0.15405777]
+Val Loss: 1.0925
+Epoch [8/100] Train Loss: 1.1014
+Val Event P(macro [0, 1, 2]): 0.3525 | R: 0.3757 | F1: 0.2341
+Per-class P: [0.22243966 0.71969697 0.11545293]  R: [0.72399151 0.11418269 0.28888889]  F1: [0.34031936 0.19709544 0.16497462]
+Val Loss: 1.0919
+Epoch [9/100] Train Loss: 1.0992
+Val Event P(macro [0, 1, 2]): 0.3365 | R: 0.3550 | F1: 0.3019
+Per-class P: [0.20518868 0.69171484 0.11247216]  R: [0.18471338 0.43149038 0.44888889]  F1: [0.19441341 0.53145818 0.17987533]
+Val Loss: 1.0932
+Epoch [10/100] Train Loss: 1.1007
+Val Event P(macro [0, 1, 2]): 0.2794 | R: 0.3764 | F1: 0.1716
+Per-class P: [0.21900161 0.5        0.11919192]  R: [8.66242038e-01 6.00961538e-04 2.62222222e-01]  F1: [0.3496144  0.00120048 0.16388889]
+Val Loss: 1.0897
+Epoch [11/100] Train Loss: 1.0978
+Val Event P(macro [0, 1, 2]): 0.1127 | R: 0.3826 | F1: 0.1740
+Per-class P: [0.22599608 0.         0.11218335]  R: [0.73460722 0.         0.41333333]  F1: [0.34565435 0.         0.17647059]
+Val Loss: 1.0926
+Epoch [12/100] Train Loss: 1.0988
+Val Event P(macro [0, 1, 2]): 0.3460 | R: 0.3529 | F1: 0.3377
+Per-class P: [0.22140221 0.69287469 0.12364425]  R: [0.12738854 0.67788462 0.25333333]  F1: [0.16172507 0.68529769 0.16618076]
+Val Loss: 1.0909
+Epoch [13/100] Train Loss: 1.0980
+Val Event P(macro [0, 1, 2]): 0.1144 | R: 0.3796 | F1: 0.1727
+Per-class P: [0.21958926 0.         0.12364425]  R: [0.88535032 0.         0.25333333]  F1: [0.35189873 0.         0.16618076]
+Val Loss: 1.0918
+Epoch [14/100] Train Loss: 1.0981
+Val Event P(macro [0, 1, 2]): 0.3443 | R: 0.3665 | F1: 0.3144
+Per-class P: [0.22562358 0.68969422 0.11764706]  R: [0.42250531 0.36598558 0.31111111]  F1: [0.29416112 0.47820966 0.17073171]
+Val Loss: 1.0892
+Epoch [15/100] Train Loss: 1.0975
+Val Event P(macro [0, 1, 2]): 0.3431 | R: 0.3627 | F1: 0.2456
+Per-class P: [0.2147651  0.70509383 0.10943396]  R: [0.54352442 0.15805288 0.38666667]  F1: [0.30787733 0.25822288 0.17058824]
+Val Loss: 1.0915
+Epoch [16/100] Train Loss: 1.0974
+Val Event P(macro [0, 1, 2]): 0.3381 | R: 0.3419 | F1: 0.2878
+Per-class P: [0.22772277 0.68516912 0.10149254]  R: [0.09766454 0.47475962 0.45333333]  F1: [0.13670134 0.56088037 0.16585366]
+Val Loss: 1.0890
+Epoch [17/100] Train Loss: 1.0965
+Val Event P(macro [0, 1, 2]): 0.3403 | R: 0.3612 | F1: 0.3041
+Per-class P: [0.217      0.68557337 0.11839709]  R: [0.46072187 0.33413462 0.28888889]  F1: [0.29503739 0.44929293 0.16795866]
+Val Loss: 1.0888
+Epoch [18/100] Train Loss: 1.0970
+Val Event P(macro [0, 1, 2]): 0.3457 | R: 0.3868 | F1: 0.2508
+Per-class P: [0.22416303 0.68562874 0.12730061]  R: [0.65392781 0.13762019 0.36888889]  F1: [0.33387534 0.22922923 0.18928164]
+Val Loss: 1.0877
+Epoch [19/100] Train Loss: 1.0954
+Val Event P(macro [0, 1, 2]): 0.3441 | R: 0.3692 | F1: 0.2671
+Per-class P: [0.22823219 0.69516729 0.10902256]  R: [0.36730361 0.22475962 0.51555556]  F1: [0.2815297  0.33969119 0.17998448]
+Val Loss: 1.0882
+Epoch [20/100] Train Loss: 1.0966
+Val Event P(macro [0, 1, 2]): 0.3400 | R: 0.3540 | F1: 0.2130
+Per-class P: [0.22051282 0.69649805 0.1029679 ]  R: [0.09129512 0.21514423 0.75555556]  F1: [0.12912913 0.32874197 0.18123667]
+Val Loss: 1.0914
+Epoch [21/100] Train Loss: 1.0964
+Val Event P(macro [0, 1, 2]): 0.3391 | R: 0.3842 | F1: 0.2007
+Per-class P: [0.22138837 0.67326733 0.12272727]  R: [0.75159236 0.04086538 0.36      ]  F1: [0.34202899 0.07705382 0.18305085]
+Val Loss: 1.0887
+Epoch [22/100] Train Loss: 1.0965
+Val Event P(macro [0, 1, 2]): 0.1119 | R: 0.3803 | F1: 0.1715
+Per-class P: [0.22525849 0.         0.11033797]  R: [0.64755839 0.         0.49333333]  F1: [0.33424658 0.         0.18034119]
+Val Loss: 1.0894
+Epoch [23/100] Train Loss: 1.0963
+Val Event P(macro [0, 1, 2]): 0.1134 | R: 0.3774 | F1: 0.1716
+Per-class P: [0.21904762 0.         0.1212766 ]  R: [0.87898089 0.         0.25333333]  F1: [0.35069886 0.         0.16402878]
+Val Loss: 1.0884
+Epoch [24/100] Train Loss: 1.0958
+Val Event P(macro [0, 1, 2]): 0.3449 | R: 0.3529 | F1: 0.3348
+Per-class P: [0.22402597 0.6925609  0.11819887]  R: [0.14649682 0.63221154 0.28      ]  F1: [0.17715019 0.66101162 0.16622691]
+Val Loss: 1.0888
+Epoch [25/100] Train Loss: 1.0947
+Val Event P(macro [0, 1, 2]): 0.3428 | R: 0.3766 | F1: 0.2476
+Per-class P: [0.22279459 0.68208092 0.12364425]  R: [0.73460722 0.14182692 0.25333333]  F1: [0.34189723 0.23482587 0.16618076]
+Val Loss: 1.0884
+Epoch [26/100] Train Loss: 1.0936
+Val Event P(macro [0, 1, 2]): 0.3368 | R: 0.3797 | F1: 0.1745
+Per-class P: [0.21939587 0.66666667 0.124197  ]  R: [0.87898089 0.00240385 0.25777778]  F1: [0.35114504 0.00479042 0.16763006]
+Val Loss: 1.0871
+Epoch [27/100] Train Loss: 1.0933
+Val Event P(macro [0, 1, 2]): 0.3436 | R: 0.3696 | F1: 0.2860
+Per-class P: [0.22169811 0.68739771 0.12159329]  R: [0.59872611 0.25240385 0.25777778]  F1: [0.32358003 0.36923077 0.16524217]
+Val Loss: 1.0872
+Epoch [28/100] Train Loss: 1.0941
+Val Event P(macro [0, 1, 2]): 0.3747 | R: 0.3808 | F1: 0.1812
+Per-class P: [0.21958926 0.77777778 0.12672811]  R: [0.88535032 0.01262019 0.24444444]  F1: [0.35189873 0.02483737 0.16691958]
+Val Loss: 1.0898
+Epoch [29/100] Train Loss: 1.0943
+Val Event P(macro [0, 1, 2]): 0.3449 | R: 0.3677 | F1: 0.3003
+Per-class P: [0.2219275  0.69272977 0.12      ]  R: [0.5329087  0.30348558 0.26666667]  F1: [0.3133583  0.42206435 0.16551724]
+Val Loss: 1.0878
+Epoch [30/100] Train Loss: 1.0926
+Val Event P(macro [0, 1, 2]): 0.3428 | R: 0.3695 | F1: 0.2793
+Per-class P: [0.22493225 0.6914557  0.11212121]  R: [0.35244161 0.26262019 0.49333333]  F1: [0.27460711 0.38066202 0.18271605]
+Val Loss: 1.0880
+Epoch [31/100] Train Loss: 1.0939
+Val Event P(macro [0, 1, 2]): 0.3398 | R: 0.3596 | F1: 0.2955
+Per-class P: [0.22197558 0.68832891 0.10921986]  R: [0.42462845 0.31189904 0.34222222]  F1: [0.29154519 0.4292804  0.1655914 ]
+Val Loss: 1.0882
+Epoch [32/100] Train Loss: 1.0936
+Val Event P(macro [0, 1, 2]): 0.3399 | R: 0.3621 | F1: 0.2760
+Per-class P: [0.22492401 0.68835616 0.10646388]  R: [0.47133758 0.24158654 0.37333333]  F1: [0.30452675 0.35765125 0.16568047]
+Val Loss: 1.0878
+Epoch [33/100] Train Loss: 1.0927
+Val Event P(macro [0, 1, 2]): 0.3440 | R: 0.3731 | F1: 0.2683
+Per-class P: [0.22658127 0.6918239  0.11356467]  R: [0.60084926 0.19831731 0.32      ]  F1: [0.32906977 0.30826716 0.16763679]
+Val Loss: 1.0874
+Epoch [34/100] Train Loss: 1.0913
+Val Event P(macro [0, 1, 2]): 0.3501 | R: 0.3754 | F1: 0.2476
+Per-class P: [0.22571429 0.71216617 0.11235955]  R: [0.67091295 0.14423077 0.31111111]  F1: [0.33778728 0.23988006 0.16509434]
+Val Loss: 1.0864
+Epoch [35/100] Train Loss: 1.0925
+Val Event P(macro [0, 1, 2]): 0.3652 | R: 0.3803 | F1: 0.2063
+Per-class P: [0.2238806  0.75609756 0.11565836]  R: [0.79617834 0.05588942 0.28888889]  F1: [0.34948742 0.10408506 0.16518424]
+Val Loss: 1.0871
+Epoch [36/100] Train Loss: 1.0919
+Val Event P(macro [0, 1, 2]): 0.3577 | R: 0.3797 | F1: 0.2157
+Per-class P: [0.22368421 0.73214286 0.11730769]  R: [0.7940552  0.07391827 0.27111111]  F1: [0.3490434  0.13427948 0.16375839]
+Val Loss: 1.0875
+Epoch [37/100] Train Loss: 1.0914
+Val Event P(macro [0, 1, 2]): 0.3453 | R: 0.3739 | F1: 0.2577
+Per-class P: [0.22337278 0.6962963  0.11608624]  R: [0.64118896 0.16947115 0.31111111]  F1: [0.331322   0.27259546 0.16908213]
+Val Loss: 1.0873
+Epoch [38/100] Train Loss: 1.0914
+Val Event P(macro [0, 1, 2]): 0.3611 | R: 0.3780 | F1: 0.2189
+Per-class P: [0.22513812 0.74725275 0.1109589 ]  R: [0.69214437 0.08173077 0.36      ]  F1: [0.33976029 0.14734561 0.16963351]
+Val Loss: 1.0869
+Epoch [39/100] Train Loss: 1.0918
+Val Event P(macro [0, 1, 2]): 0.3562 | R: 0.3801 | F1: 0.2456
+Per-class P: [0.22727273 0.72727273 0.11414791]  R: [0.69002123 0.13461538 0.31555556]  F1: [0.3419253  0.22718053 0.16765053]
+Val Loss: 1.0872
+Epoch [40/100] Train Loss: 1.0912
+Val Event P(macro [0, 1, 2]): 0.3607 | R: 0.3751 | F1: 0.2131
+Per-class P: [0.22413793 0.74846626 0.10935024]  R: [0.74522293 0.07331731 0.30666667]  F1: [0.34462445 0.13355227 0.16121495]
+Val Loss: 1.0869
+Epoch [41/100] Train Loss: 1.0900
+Val Event P(macro [0, 1, 2]): 0.3553 | R: 0.3781 | F1: 0.2366
+Per-class P: [0.22678951 0.72761194 0.11160059]  R: [0.67940552 0.1171875  0.33777778]  F1: [0.34006376 0.20186335 0.16777042]
+Val Loss: 1.0869
+Epoch [42/100] Train Loss: 1.0910
+Val Event P(macro [0, 1, 2]): 0.3670 | R: 0.3806 | F1: 0.2156
+Per-class P: [0.22659176 0.7625     0.11204013]  R: [0.77070064 0.07331731 0.29777778]  F1: [0.35021708 0.13377193 0.16281896]
+Val Loss: 1.0872
+Epoch [43/100] Train Loss: 1.0893
+Val Event P(macro [0, 1, 2]): 0.3483 | R: 0.3734 | F1: 0.2557
+Per-class P: [0.22542498 0.70769231 0.11183144]  R: [0.64755839 0.16586538 0.30666667]  F1: [0.33442982 0.26874391 0.16389549]
+Val Loss: 1.0874
+Epoch [44/100] Train Loss: 1.0896
+Val Event P(macro [0, 1, 2]): 0.3629 | R: 0.3788 | F1: 0.2164
+Per-class P: [0.22635561 0.75147929 0.1107438 ]  R: [0.76220807 0.07632212 0.29777778]  F1: [0.34905202 0.13857065 0.16144578]
+Val Loss: 1.0871
+Early stopping triggered.
+Restored best weights from epoch 34 (best loss 1.0864, lowest val loss 1.0864).
+
+	Elapsed time is 56.3248 seconds.
+
+==========================================================================================
+Total parameters: 212947
+Total memory (bytes): 1703576
+Total memory (MB): 1.6246566772460938
+==========================================================================================
+
+TRANSFORMER Stage 2 (Type Classifier) Standalone Validation
+Accuracy: 25.69% (604/2351)
+Per-Class Accuracy:
+  Chemical: 61.79% (283/458)
+  Electric: 15.11% (252/1668)
+  Impulsive: 30.67% (69/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Chemical     0.2089    0.6179    0.3122       458
+    Electric     0.6981    0.1511    0.2484      1668
+   Impulsive     0.1087    0.3067    0.1605       225
+
+    accuracy                         0.2569      2351
+   macro avg     0.3385    0.3585    0.2404      2351
+weighted avg     0.5464    0.2569    0.2524      2351
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_Chemical  P_Electric  P_Impulsive
+T_Chemical          283          78           97
+T_Electric          947         252          469
+T_Impulsive         125          31           69
+
+TRANSFORMER Cascade Evaluation
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225        1000    72.00%      16.60%
+Electric             225         772    61.33%      23.96%
+Impulsive            225         476     5.78%       2.73%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_TRANSFORMER_cascade_10min1500EvalTest_Seed2.png
+
+--- Cascade Stage 1 (Detector) Standalone Metrics ---
+Accuracy: 56.12% (5051/9000)
+Per-Class Accuracy:
+  No Thrust: 48.19% (3204/6649)
+  Thrust: 78.56% (1847/2351)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8641    0.4819    0.6187      6649
+      Thrust     0.3490    0.7856    0.4833      2351
+
+    accuracy                         0.5612      9000
+   macro avg     0.6065    0.6338    0.5510      9000
+weighted avg     0.7295    0.5612    0.5833      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Thrust
+T_No Thrust         3204      3445
+T_Thrust             504      1847
+
+--- Cascade End-to-End (Stage1 -> Stage2 combined) Metrics ---
+Accuracy: 41.57% (3741/9000)
+Per-Class Accuracy:
+  No Thrust: 48.19% (3204/6649)
+  Chemical: 60.48% (277/458)
+  Electric: 14.81% (247/1668)
+  Impulsive: 5.78% (13/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8641    0.4819    0.6187      6649
+    Chemical     0.0734    0.6048    0.1310       458
+    Electric     0.2384    0.1481    0.1827      1668
+   Impulsive     0.0269    0.0578    0.0367       225
+
+    accuracy                         0.4157      9000
+   macro avg     0.3007    0.3231    0.2423      9000
+weighted avg     0.6870    0.4157    0.4985      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3204        2447         681          317
+T_Chemical            69         277          78           34
+T_Electric           374         927         247          120
+T_Impulsive           61         121          30           13
+
+Stage-2 type accuracy conditioned on correct stage-1 detection: 29.07% (1847 frames)
+Stage-1 (detector-only) accuracy: 56.12%
+
+TRANSFORMER Cascade Inference Time	Elapsed time is 0.5650 seconds.
+
+================================================================================
+Backbone: CNN
+================================================================================
+
+Entering CNN Joint (4-class) Training Loop
+Epoch [1/100] Train Loss: 1.3231
+Val Event P(macro [1, 2, 3]): 0.1133 | R: 0.3264 | F1: 0.1516
+Per-class P: [0.9978022  0.08043478 0.23070907 0.02877947]  R: [0.27349398 0.07855626 0.53185096 0.36888889]  F1: [0.42931442 0.07948443 0.32181818 0.05339337]
+Val Loss: 1.2833
+Epoch [2/100] Train Loss: 1.2953
+Val Event P(macro [1, 2, 3]): 0.0911 | R: 0.3496 | F1: 0.1035
+Per-class P: [0.99671053 0.07145293 0.20198171 0.        ]  R: [0.27379518 0.8895966  0.15925481 0.        ]  F1: [0.42958412 0.13228098 0.1780914  0.        ]
+Val Loss: 1.2895
+Epoch [3/100] Train Loss: 1.2909
+Val Event P(macro [1, 2, 3]): 0.1151 | R: 0.3588 | F1: 0.1503
+Per-class P: [0.95496324 0.07796524 0.22962227 0.03777778]  R: [0.31295181 0.64755839 0.27764423 0.15111111]  F1: [0.47141561 0.13917408 0.25136017 0.06044444]
+Val Loss: 1.2767
+Epoch [4/100] Train Loss: 1.2851
+Val Event P(macro [1, 2, 3]): 0.1176 | R: 0.3517 | F1: 0.1631
+Per-class P: [0.9559633  0.07964602 0.23995536 0.03309859]  R: [0.31385542 0.45859873 0.38762019 0.20888889]  F1: [0.47256236 0.13572102 0.29641544 0.05714286]
+Val Loss: 1.2637
+Epoch [5/100] Train Loss: 1.2829
+Val Event P(macro [1, 2, 3]): 0.1231 | R: 0.3775 | F1: 0.0670
+Per-class P: [1.         0.08538084 0.25       0.03381295]  R: [0.27108434 0.29511677 0.00180288 0.83555556]  F1: [0.42654028 0.13244402 0.00357995 0.06499568]
+Val Loss: 1.2846
+Epoch [6/100] Train Loss: 1.2823
+Val Event P(macro [1, 2, 3]): 0.1188 | R: 0.3773 | F1: 0.0928
+Per-class P: [1.         0.08281893 0.24333333 0.03021248]  R: [0.27108434 0.6836518  0.04387019 0.40444444]  F1: [0.42654028 0.14774031 0.07433809 0.0562249 ]
+Val Loss: 1.2725
+Epoch [7/100] Train Loss: 1.2810
+Val Event P(macro [1, 2, 3]): 0.1121 | R: 0.3579 | F1: 0.0826
+Per-class P: [0.94454073 0.07711161 0.2254902  0.03378378]  R: [0.32831325 0.86836518 0.02764423 0.17777778]  F1: [0.48725972 0.14164502 0.04925054 0.05677786]
+Val Loss: 1.2726
+Epoch [8/100] Train Loss: 1.2815
+Val Event P(macro [1, 2, 3]): 0.1198 | R: 0.3757 | F1: 0.0692
+Per-class P: [1.         0.07925801 0.25       0.0300659 ]  R: [0.27108434 0.79830149 0.00420673 0.32444444]  F1: [0.42654028 0.14419942 0.00827423 0.05503204]
+Val Loss: 1.2794
+Epoch [9/100] Train Loss: 1.2804
+Val Event P(macro [1, 2, 3]): 0.1193 | R: 0.3582 | F1: 0.1105
+Per-class P: [0.9878178  0.08219178 0.24677419 0.02896341]  R: [0.28087349 0.56050955 0.09194712 0.42222222]  F1: [0.43738274 0.14336139 0.13397548 0.05420827]
+Val Loss: 1.2715
+Epoch [10/100] Train Loss: 1.2806
+Val Event P(macro [1, 2, 3]): 0.1167 | R: 0.3690 | F1: 0.1193
+Per-class P: [0.9893617  0.08099613 0.24038462 0.02881041]  R: [0.28012048 0.71125265 0.12019231 0.27555556]  F1: [0.43661972 0.14543087 0.16025641 0.0521666 ]
+Val Loss: 1.2769
+Epoch [11/100] Train Loss: 1.2767
+Val Event P(macro [1, 2, 3]): 0.1148 | R: 0.3667 | F1: 0.1145
+Per-class P: [0.98887712 0.07988722 0.23544974 0.02904762]  R: [0.2811747  0.72186837 0.10697115 0.27111111]  F1: [0.43785178 0.14385445 0.14710744 0.05247312]
+Val Loss: 1.2789
+Epoch [12/100] Train Loss: 1.2766
+Val Event P(macro [1, 2, 3]): 0.1150 | R: 0.3508 | F1: 0.0859
+Per-class P: [0.95894834 0.07837723 0.23863636 0.02795699]  R: [0.31310241 0.78343949 0.03786058 0.23111111]  F1: [0.47207084 0.14249855 0.0653527  0.0498801 ]
+Val Loss: 1.2725
+Epoch [13/100] Train Loss: 1.2759
+Val Event P(macro [1, 2, 3]): 0.1072 | R: 0.3604 | F1: 0.0924
+Per-class P: [0.98989362 0.07735613 0.21601942 0.02824268]  R: [0.28027108 0.78768577 0.05348558 0.24      ]  F1: [0.43685446 0.14087716 0.08574181 0.05053814]
+Val Loss: 1.2810
+Epoch [14/100] Train Loss: 1.2751
+Val Event P(macro [1, 2, 3]): 0.1134 | R: 0.3467 | F1: 0.1191
+Per-class P: [0.96449136 0.07526116 0.23497854 0.02990971]  R: [0.30271084 0.67303609 0.13161058 0.23555556]  F1: [0.4607978  0.1353833  0.16872111 0.05307962]
+Val Loss: 1.2761
+Early stopping triggered.
+Restored best weights from epoch 4 (best loss 1.2637, lowest val loss 1.2637).
+
+	Elapsed time is 51.0578 seconds.
+
+==========================================================================================
+Total parameters: 472708
+Total memory (bytes): 3781664
+Total memory (MB): 3.606475830078125
+==========================================================================================
+
+CNN Joint Validation
+Accuracy: 33.60% (3024/9000)
+Per-Class Accuracy:
+  No Thrust: 31.49% (2094/6649)
+  Chemical: 42.14% (193/458)
+  Electric: 41.49% (692/1668)
+  Impulsive: 20.00% (45/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.9536    0.3149    0.4735      6649
+    Chemical     0.0761    0.4214    0.1290       458
+    Electric     0.2419    0.4149    0.3056      1668
+   Impulsive     0.0320    0.2000    0.0551       225
+
+    accuracy                         0.3360      9000
+   macro avg     0.3259    0.3378    0.2408      9000
+weighted avg     0.7540    0.3360    0.4144      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         2094        1640        1874         1041
+T_Chemical             8         193         202           55
+T_Electric            83         626         692          267
+T_Impulsive           11          76          93           45
+
+CNN Joint Inference Time	Elapsed time is 0.3109 seconds.
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         807    52.00%      14.87%
+Electric             225        1239    82.67%      24.29%
+Impulsive            225        1404    20.00%       3.21%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_CNN_joint_10min1500EvalTest_Seed2.png
+
+Entering CNN Stage 1 (Detector) Training Loop
+Epoch [1/100] Train Loss: 0.6090
+Val Event P(macro [1]): 0.3339 | R: 0.9475 | F1: 0.4938
+Per-class P: [0.94618056 0.3339307 ]  R: [0.32831325 0.94745763]  F1: [0.48747764 0.49381625]
+Val Loss: 0.6355
+Epoch [2/100] Train Loss: 0.5942
+Val Event P(macro [1]): 0.3467 | R: 0.8356 | F1: 0.4901
+Per-class P: [0.88285024 0.3466948 ]  R: [0.44036145 0.83559322]  F1: [0.58762058 0.49005964]
+Val Loss: 0.5969
+Epoch [3/100] Train Loss: 0.5908
+Val Event P(macro [1]): 0.3318 | R: 0.9525 | F1: 0.4921
+Per-class P: [0.94964029 0.33175915]  R: [0.31807229 0.95254237]  F1: [0.4765343  0.49211909]
+Val Loss: 0.6098
+Epoch [4/100] Train Loss: 0.5903
+Val Event P(macro [1]): 0.3280 | R: 0.9979 | F1: 0.4937
+Per-class P: [0.99725275 0.32799443]  R: [0.27334337 0.99788136]  F1: [0.42907801 0.49371069]
+Val Loss: 0.6167
+Epoch [5/100] Train Loss: 0.5906
+Val Event P(macro [1]): 0.3444 | R: 0.8504 | F1: 0.4902
+Per-class P: [0.88871375 0.344372  ]  R: [0.42454819 0.85042373]  F1: [0.57460253 0.4902296 ]
+Val Loss: 0.6035
+Epoch [6/100] Train Loss: 0.5887
+Val Event P(macro [1]): 0.3527 | R: 0.7886 | F1: 0.4874
+Per-class P: [0.8660043  0.35272934]  R: [0.48569277 0.78855932]  F1: [0.62234658 0.48742797]
+Val Loss: 0.5874
+Epoch [7/100] Train Loss: 0.5894
+Val Event P(macro [1]): 0.3394 | R: 0.8898 | F1: 0.4913
+Per-class P: [0.90753912 0.33936652]  R: [0.38433735 0.88983051]  F1: [0.53999154 0.491343  ]
+Val Loss: 0.6044
+Epoch [8/100] Train Loss: 0.5886
+Val Event P(macro [1]): 0.3280 | R: 0.9992 | F1: 0.4939
+Per-class P: [0.99889625 0.32804674]  R: [0.27259036 0.99915254]  F1: [0.42830099 0.49392543]
+Val Loss: 0.6095
+Epoch [9/100] Train Loss: 0.5883
+Val Event P(macro [1]): 0.3364 | R: 0.9093 | F1: 0.4911
+Per-class P: [0.91832061 0.33636364]  R: [0.3623494  0.90932203]  F1: [0.51965443 0.49107551]
+Val Loss: 0.6075
+Epoch [10/100] Train Loss: 0.5885
+Val Event P(macro [1]): 0.3310 | R: 0.9644 | F1: 0.4929
+Per-class P: [0.96045198 0.3310064 ]  R: [0.30722892 0.96440678]  F1: [0.46554085 0.49285405]
+Val Loss: 0.6057
+Epoch [11/100] Train Loss: 0.5886
+Val Event P(macro [1]): 0.3415 | R: 0.8640 | F1: 0.4895
+Per-class P: [0.89402443 0.34148384]  R: [0.40783133 0.86398305]  F1: [0.56014066 0.48949706]
+Val Loss: 0.5995
+Epoch [12/100] Train Loss: 0.5880
+Val Event P(macro [1]): 0.3483 | R: 0.8288 | F1: 0.4905
+Per-class P: [0.88061466 0.3482906 ]  R: [0.44879518 0.82881356]  F1: [0.59457302 0.49047141]
+Val Loss: 0.6015
+Epoch [13/100] Train Loss: 0.5876
+Val Event P(macro [1]): 0.3294 | R: 0.9792 | F1: 0.4930
+Per-class P: [0.97530242 0.32938997]  R: [0.29141566 0.97923729]  F1: [0.44874768 0.49296075]
+Val Loss: 0.6068
+Epoch [14/100] Train Loss: 0.5891
+Val Event P(macro [1]): 0.3278 | R: 0.9996 | F1: 0.4937
+Per-class P: [0.99944568 0.32782101]  R: [0.27153614 0.99957627]  F1: [0.42704879 0.49372122]
+Val Loss: 0.6261
+Epoch [15/100] Train Loss: 0.5888
+Val Event P(macro [1]): 0.3288 | R: 0.9915 | F1: 0.4939
+Per-class P: [0.98938429 0.32883642]  R: [0.28072289 0.99152542]  F1: [0.43735336 0.49387927]
+Val Loss: 0.6144
+Epoch [16/100] Train Loss: 0.5878
+Val Event P(macro [1]): 0.3517 | R: 0.8047 | F1: 0.4894
+Per-class P: [0.87194444 0.35166667]  R: [0.47274096 0.80466102]  F1: [0.61308594 0.48943299]
+Val Loss: 0.5983
+Early stopping triggered.
+Restored best weights from epoch 6 (best loss 0.5874, lowest val loss 0.5874).
+
+	Elapsed time is 57.4126 seconds.
+
+==========================================================================================
+Total parameters: 472450
+Total memory (bytes): 3779600
+Total memory (MB): 3.6045074462890625
+==========================================================================================
+
+Entering CNN Stage 2 (Type Classifier) Training Loop
+Epoch [1/100] Train Loss: 1.1356
+Val Event P(macro [0, 1, 2]): 0.3476 | R: 0.3494 | F1: 0.3446
+Per-class P: [0.22699387 0.70614597 0.10958904]  R: [0.31422505 0.66286058 0.07111111]  F1: [0.2635797  0.68381897 0.08625337]
+Val Loss: 1.0980
+Epoch [2/100] Train Loss: 1.1115
+Val Event P(macro [0, 1, 2]): 0.3625 | R: 0.3451 | F1: 0.1457
+Per-class P: [0.2056933  0.77777778 0.10404624]  R: [0.95116773 0.00420673 0.08      ]  F1: [0.33824085 0.0083682  0.09045226]
+Val Loss: 1.1081
+Epoch [3/100] Train Loss: 1.1070
+Val Event P(macro [0, 1, 2]): 0.3570 | R: 0.3602 | F1: 0.2775
+Per-class P: [0.21805467 0.7299169  0.12307692]  R: [0.72823779 0.31670673 0.03555556]  F1: [0.33561644 0.4417435  0.05517241]
+Val Loss: 1.0983
+Epoch [4/100] Train Loss: 1.1039
+Val Event P(macro [0, 1, 2]): 0.1081 | R: 0.3651 | F1: 0.1666
+Per-class P: [0.22666667 0.         0.09767442]  R: [0.72186837 0.         0.37333333]  F1: [0.34500254 0.         0.15483871]
+Val Loss: 1.0934
+Epoch [5/100] Train Loss: 1.1003
+Val Event P(macro [0, 1, 2]): 0.1104 | R: 0.3746 | F1: 0.1705
+Per-class P: [0.22171946 0.         0.10947109]  R: [0.72823779 0.         0.39555556]  F1: [0.33994054 0.         0.17148362]
+Val Loss: 1.0970
+Epoch [6/100] Train Loss: 1.1016
+Val Event P(macro [0, 1, 2]): 0.3681 | R: 0.3568 | F1: 0.3537
+Per-class P: [0.24472574 0.70494336 0.15469613]  R: [0.12314225 0.82271635 0.12444444]  F1: [0.16384181 0.75929007 0.13793103]
+Val Loss: 1.0957
+Epoch [7/100] Train Loss: 1.0991
+Val Event P(macro [0, 1, 2]): 0.3526 | R: 0.3646 | F1: 0.3079
+Per-class P: [0.22637195 0.72610723 0.10526316]  R: [0.63057325 0.37439904 0.08888889]  F1: [0.33314638 0.49405234 0.09638554]
+Val Loss: 1.0960
+Epoch [8/100] Train Loss: 1.0978
+Val Event P(macro [0, 1, 2]): 0.4464 | R: 0.3714 | F1: 0.1684
+Per-class P: [0.21490117 1.         0.12435233]  R: [9.00212314e-01 6.00961538e-04 2.13333333e-01]  F1: [0.34697218 0.0012012  0.15711948]
+Val Loss: 1.0978
+Epoch [9/100] Train Loss: 1.0978
+Val Event P(macro [0, 1, 2]): 0.3635 | R: 0.3675 | F1: 0.2254
+Per-class P: [0.21856449 0.75836431 0.11344538]  R: [0.85987261 0.12259615 0.12      ]  F1: [0.34853701 0.21107087 0.11663067]
+Val Loss: 1.0983
+Epoch [10/100] Train Loss: 1.0980
+Val Event P(macro [0, 1, 2]): 0.3368 | R: 0.3402 | F1: 0.2851
+Per-class P: [0.21428571 0.69146889 0.10478655]  R: [0.01273885 0.64783654 0.36      ]  F1: [0.0240481  0.66894198 0.16232465]
+Val Loss: 1.0928
+Epoch [11/100] Train Loss: 1.0950
+Val Event P(macro [0, 1, 2]): 0.1108 | R: 0.3744 | F1: 0.1683
+Per-class P: [0.22650602 0.         0.1058296 ]  R: [0.59872611 0.         0.52444444]  F1: [0.32867133 0.         0.1761194 ]
+Val Loss: 1.0926
+Epoch [12/100] Train Loss: 1.0949
+Val Event P(macro [0, 1, 2]): 0.3391 | R: 0.3573 | F1: 0.2656
+Per-class P: [0.22117647 0.69216758 0.10405827]  R: [0.39915074 0.22836538 0.44444444]  F1: [0.28463285 0.34342521 0.16863406]
+Val Loss: 1.0913
+Epoch [13/100] Train Loss: 1.0942
+Val Event P(macro [0, 1, 2]): 0.3529 | R: 0.3702 | F1: 0.2337
+Per-class P: [0.22129032 0.72727273 0.11028037]  R: [0.72823779 0.12019231 0.26222222]  F1: [0.33943592 0.2062919  0.15526316]
+Val Loss: 1.0933
+Epoch [14/100] Train Loss: 1.0935
+Val Event P(macro [0, 1, 2]): 0.3459 | R: 0.3596 | F1: 0.3140
+Per-class P: [0.23315364 0.7        0.10458453]  R: [0.36730361 0.38701923 0.32444444]  F1: [0.2852432  0.49845201 0.15817985]
+Val Loss: 1.0927
+Epoch [15/100] Train Loss: 1.0915
+Val Event P(macro [0, 1, 2]): 0.3503 | R: 0.3559 | F1: 0.3503
+Per-class P: [0.22852234 0.69939066 0.12292359]  R: [0.28237792 0.62079327 0.16444444]  F1: [0.25261159 0.65775231 0.14068441]
+Val Loss: 1.0932
+Epoch [16/100] Train Loss: 1.0934
+Val Event P(macro [0, 1, 2]): 0.3573 | R: 0.3644 | F1: 0.1721
+Per-class P: [0.21070897 0.73333333 0.12779553]  R: [0.90233546 0.01322115 0.17777778]  F1: [0.34163987 0.02597403 0.14869888]
+Val Loss: 1.0995
+Epoch [17/100] Train Loss: 1.0926
+Val Event P(macro [0, 1, 2]): 0.3519 | R: 0.3666 | F1: 0.2548
+Per-class P: [0.21996186 0.72439024 0.11140584]  R: [0.73460722 0.17848558 0.18666667]  F1: [0.33855186 0.28640309 0.13953488]
+Val Loss: 1.1011
+Epoch [18/100] Train Loss: 1.0887
+Val Event P(macro [0, 1, 2]): 0.3558 | R: 0.3643 | F1: 0.2343
+Per-class P: [0.21654222 0.73786408 0.11290323]  R: [0.80042463 0.13701923 0.15555556]  F1: [0.34086799 0.23112012 0.13084112]
+Val Loss: 1.0987
+Epoch [19/100] Train Loss: 1.0844
+Val Event P(macro [0, 1, 2]): 0.3410 | R: 0.3470 | F1: 0.2036
+Per-class P: [0.21246924 0.71354167 0.09694415]  R: [0.54989384 0.08233173 0.40888889]  F1: [0.30650888 0.14762931 0.15672913]
+Val Loss: 1.0995
+Epoch [20/100] Train Loss: 1.0810
+Val Event P(macro [0, 1, 2]): 0.3534 | R: 0.3651 | F1: 0.1934
+Per-class P: [0.21251932 0.73873874 0.10890052]  R: [0.58386412 0.04927885 0.46222222]  F1: [0.31161473 0.09239437 0.17627119]
+Val Loss: 1.1021
+Epoch [21/100] Train Loss: 1.0781
+Val Event P(macro [0, 1, 2]): 0.3451 | R: 0.3518 | F1: 0.1973
+Per-class P: [0.21334311 0.72297297 0.0990566 ]  R: [0.61783439 0.06430288 0.37333333]  F1: [0.31716621 0.11810155 0.15657036]
+Val Loss: 1.1050
+Epoch [22/100] Train Loss: 1.0740
+Val Event P(macro [0, 1, 2]): 0.3383 | R: 0.3504 | F1: 0.2845
+Per-class P: [0.21159715 0.69855072 0.10480349]  R: [0.44161359 0.28966346 0.32      ]  F1: [0.28610729 0.40951572 0.15789474]
+Val Loss: 1.1112
+Early stopping triggered.
+Restored best weights from epoch 12 (best loss 1.0913, lowest val loss 1.0913).
+
+	Elapsed time is 78.2252 seconds.
+
+==========================================================================================
+Total parameters: 472579
+Total memory (bytes): 3780632
+Total memory (MB): 3.6054916381835938
+==========================================================================================
+
+CNN Stage 2 (Type Classifier) Standalone Validation
+Accuracy: 27.78% (653/2351)
+Per-Class Accuracy:
+  Chemical: 37.99% (174/458)
+  Electric: 22.48% (375/1668)
+  Impulsive: 46.22% (104/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Chemical     0.2186    0.3799    0.2775       458
+    Electric     0.6957    0.2248    0.3398      1668
+   Impulsive     0.1024    0.4622    0.1676       225
+
+    accuracy                         0.2778      2351
+   macro avg     0.3389    0.3557    0.2616      2351
+weighted avg     0.5460    0.2778    0.3112      2351
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_Chemical  P_Electric  P_Impulsive
+T_Chemical          174         108          176
+T_Electric          557         375          736
+T_Impulsive          65          56          104
+
+CNN Cascade Evaluation
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             225         980    53.78%      12.55%
+Electric             225         748    61.33%      24.06%
+Impulsive            225        1008    21.33%       4.76%
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_CNN_cascade_10min1500EvalTest_Seed2.png
+
+--- Cascade Stage 1 (Detector) Standalone Metrics ---
+Accuracy: 56.30% (5067/9000)
+Per-Class Accuracy:
+  No Thrust: 48.49% (3224/6649)
+  Thrust: 78.39% (1843/2351)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8639    0.4849    0.6211      6649
+      Thrust     0.3498    0.7839    0.4838      2351
+
+    accuracy                         0.5630      9000
+   macro avg     0.6069    0.6344    0.5525      9000
+weighted avg     0.7296    0.5630    0.5853      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Thrust
+T_No Thrust         3224      3425
+T_Thrust             508      1843
+
+--- Cascade End-to-End (Stage1 -> Stage2 combined) Metrics ---
+Accuracy: 42.18% (3796/9000)
+Per-Class Accuracy:
+  No Thrust: 48.49% (3224/6649)
+  Chemical: 37.77% (173/458)
+  Electric: 21.04% (351/1668)
+  Impulsive: 21.33% (48/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.8639    0.4849    0.6211      6649
+    Chemical     0.0781    0.3777    0.1294       458
+    Electric     0.2411    0.2104    0.2247      1668
+   Impulsive     0.0301    0.2133    0.0527       225
+
+    accuracy                         0.4218      9000
+   macro avg     0.3033    0.3216    0.2570      9000
+weighted avg     0.6876    0.4218    0.5084      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3224        1429         946         1050
+T_Chemical            68         173         105          112
+T_Electric           382         549         351          386
+T_Impulsive           58          65          54           48
+
+Stage-2 type accuracy conditioned on correct stage-1 detection: 31.04% (1843 frames)
+Stage-1 (detector-only) accuracy: 56.30%
+
+CNN Cascade Inference Time	Elapsed time is 1.0467 seconds.
+
+================================================================================
+Classic ML / GBDT baselines (Hankel window length=5)
+================================================================================
+
+Entering LightGBM (joint) Training Loop
+
+	Elapsed time is 0.2027 seconds.
+
+==========================================================================================
+Total parameters: NaN
+Total memory (bytes): 419217
+Total memory (MB): 0.3997964859008789
+==========================================================================================
+
+LightGBM (joint) Validation
+Accuracy: 71.98% (3887/5400)
+Per-Class Accuracy:
+  No Thrust: 100.00% (3887/3887)
+  Chemical: 0.00% (0/312)
+  Electric: 0.00% (0/1053)
+  Impulsive: 0.00% (0/148)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.7198    1.0000    0.8371      3887
+    Chemical     0.0000    0.0000    0.0000       312
+    Electric     0.0000    0.0000    0.0000      1053
+   Impulsive     0.0000    0.0000    0.0000       148
+
+    accuracy                         0.7198      5400
+   macro avg     0.1800    0.2500    0.2093      5400
+weighted avg     0.5181    0.7198    0.6025      5400
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         3887           0           0            0
+T_Chemical           312           0           0            0
+T_Electric          1053           0           0            0
+T_Impulsive          148           0           0            0
+
+LightGBM (joint) Inference Time	Elapsed time is 0.0181 seconds.
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             165           0     0.00%         n/a
+Electric             225           0     0.00%         n/a
+Impulsive            148           0     0.00%         n/a
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_LightGBM_joint_10min1500EvalTest_Seed2.png
+
+Entering LightGBM Stage 1 (Detector) Training Loop
+
+	Elapsed time is 0.1182 seconds.
+
+==========================================================================================
+Total parameters: NaN
+Total memory (bytes): 212675
+Total memory (MB): 0.20282268524169922
+==========================================================================================
+
+Entering LightGBM Stage 2 (Type Classifier) Training Loop
+
+	Elapsed time is 0.1040 seconds.
+
+==========================================================================================
+Total parameters: NaN
+Total memory (bytes): 314922
+Total memory (MB): 0.30033302307128906
+==========================================================================================
+
+LightGBM Stage 2 (Type Classifier) Standalone Validation
+Accuracy: 69.60% (1053/1513)
+Per-Class Accuracy:
+  Chemical: 0.00% (0/312)
+  Electric: 100.00% (1053/1053)
+  Impulsive: 0.00% (0/148)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Chemical     0.0000    0.0000    0.0000       312
+    Electric     0.6960    1.0000    0.8207      1053
+   Impulsive     0.0000    0.0000    0.0000       148
+
+    accuracy                         0.6960      1513
+   macro avg     0.2320    0.3333    0.2736      1513
+weighted avg     0.4844    0.6960    0.5712      1513
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_Chemical  P_Electric  P_Impulsive
+T_Chemical            0         312            0
+T_Electric            0        1053            0
+T_Impulsive           0         148            0
+
+LightGBM Cascade Evaluation
+
+Event-level (segment) metrics -- 'any overlap' detection per contiguous true/predicted run:
+Class         TrueEvents  PredEvents    Recall   Precision
+Chemical             165           0     0.00%         n/a
+Electric             225           0     0.00%         n/a
+Impulsive            148           0     0.00%         n/a
+Caveat: Impulsive's forward-filled label (burn instant -> end of window) makes its 'any overlap' recall/precision structurally easier to satisfy than Chemical/Electric's bounded bursts -- not directly comparable across classes. Also note 'any overlap' recall alone does not penalize flicker (a correctly-recalled true event can still contain stray wrong-class guesses); it's a spurious class's own precision that catches that.
+Saved sequence prediction plot -> gmat/data/seqClassification/geo/10min-1500/plots/seqpred_LightGBM_cascade_10min1500EvalTest_Seed2.png
+
+--- Cascade Stage 1 (Detector) Standalone Metrics ---
+Accuracy: 73.88% (6649/9000)
+Per-Class Accuracy:
+  No Thrust: 100.00% (6649/6649)
+  Thrust: 0.00% (0/2351)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.7388    1.0000    0.8498      6649
+      Thrust     0.0000    0.0000    0.0000      2351
+
+    accuracy                         0.7388      9000
+   macro avg     0.3694    0.5000    0.4249      9000
+weighted avg     0.5458    0.7388    0.6278      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Thrust
+T_No Thrust         6649         0
+T_Thrust            2351         0
+
+--- Cascade End-to-End (Stage1 -> Stage2 combined) Metrics ---
+Accuracy: 73.88% (6649/9000)
+Per-Class Accuracy:
+  No Thrust: 100.00% (6649/6649)
+  Chemical: 0.00% (0/458)
+  Electric: 0.00% (0/1668)
+  Impulsive: 0.00% (0/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.7388    1.0000    0.8498      6649
+    Chemical     0.0000    0.0000    0.0000       458
+    Electric     0.0000    0.0000    0.0000      1668
+   Impulsive     0.0000    0.0000    0.0000       225
+
+    accuracy                         0.7388      9000
+   macro avg     0.1847    0.2500    0.2124      9000
+weighted avg     0.5458    0.7388    0.6278      9000
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust         6649           0           0            0
+T_Chemical           458           0           0            0
+T_Electric          1668           0           0            0
+T_Impulsive          225           0           0            0
+
+No frames with correct stage-1 positive detection to condition stage-2 accuracy on.
+Stage-1 (detector-only) accuracy: 73.88%
+
+LightGBM Cascade Inference Time	Elapsed time is 0.4718 seconds.
