@@ -1,8 +1,9 @@
 #!/bin/bash
 #
 # Manuscript sweep: 5 arms x 3 feature sets x 3 windows x 3 seeds = 135 runs.
-# Measured 1396s for one 30min cell, so budget ~50 hours. Resumable: a cell whose log already
-# carries the completion marker is skipped, so Ctrl-C / reboot / OOM costs one run.
+# Measured 1396s for one 30min cell before --minirocket, which adds ~160s, so budget ~57 hours.
+# Resumable: a cell whose log already carries the completion marker is skipped, so Ctrl-C / reboot
+# / OOM costs one run.
 #
 # The three feature sets are an INCREMENTAL ablation -- 6 -> 8 -> 11 channels -- so any gain is
 # attributable to one step:
@@ -44,9 +45,17 @@ SCRIPT=scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py
 
 # --standardize on BOTH feature arms (not just the OE one) so the two arms differ only in the
 # feature set. LightGBM is on by default -- do NOT pass --no-classic. No xgboost/catboost/rf/
-# extratrees/mlp/minirocket: they roughly double wall clock for baselines the paper doesn't use.
+# extratrees/mlp: they roughly double wall clock for baselines the paper doesn't use.
 # --eval-test so in-distribution cells report the held-out split rather than the validation split
 # that early stopping and best-checkpoint restore already selected on.
+#
+# --minirocket is a kernel-transform baseline at genuine per-timestep granularity (joint AND
+# cascade). ~160s/cell at 30min: the kernel transform itself is under 2s, and essentially all of
+# the cost is the ridge normal equations (~125s for the joint+stage-1 pass, which share one Gram,
+# plus ~32s for stage 2 on the thrust-frame subset). It earns its place by being the one model
+# here whose per-timestep and whole-trajectory scores are directly comparable on identical
+# features (~0.73 vs ~0.99 macro F1 on leo/30min/phys) -- a clean measurement of what PPV pooling
+# costs on a localization task.
 COMMON=(
     --systems "$SYSTEMS"
     --mode all
@@ -55,6 +64,7 @@ COMMON=(
     --standardize
     --loss-scheme inverse
     --eval-test
+    --minirocket
     --save
 )
 
@@ -94,8 +104,11 @@ run_one() {   # train test feat propMin seed
     local log="gmat/data/seqClassification/${train}/${propMin}min-${SYSTEMS}/${stem}.log"
 
     # Completion marker, not mere existence: --save opens the log 'w' at startup, so an interrupted
-    # run leaves a partial file that would otherwise look done. LightGBM runs last in this flag set.
-    if [ -f "$log" ] && grep -q "LightGBM Cascade Inference Time" "$log"; then
+    # run leaves a partial file that would otherwise look done. MiniRocket's block is dispatched
+    # last in main(), after the classic-ML/LightGBM one, so ITS final line is the marker -- keying
+    # on LightGBM's would treat a run that died inside MiniRocket as complete. Consequence: logs
+    # produced before --minirocket joined COMMON lack this line and correctly re-run.
+    if [ -f "$log" ] && grep -q "MiniRocket Cascade Inference Time" "$log"; then
         echo "[skip] $stem"
         SKIPPED=$((SKIPPED + 1))
         return 0
@@ -144,6 +157,7 @@ if [ "$SKIP_PARSE" = 1 ]; then exit 0; fi
 # emit_outputs=False and bypasses that cache entirely. Use --emit-per-log --force if you also want
 # the per-log runs_*.csv (parameter counts, training time).
 cd gmat/data/seqClassification
+"$PYTHON" displaySeqLogData.py .
 for train in $(echo "$ARMS" | tr ' ' '\n' | cut -d: -f1 | sort -u); do
     "$PYTHON" displaySeqLogData.py . --group-dir "${train}/" --group-name manuscript
 done

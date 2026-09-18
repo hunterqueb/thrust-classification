@@ -30,9 +30,10 @@
 # --catboost/--rf/--extratrees to opt in) and --mlp (PCA+MLP) operate on Hankel-windowed rows
 # (a trailing per-timestep context window, via buildHankelWindowRowsPerTimestep) rather than
 # full [B,T,C] sequences -- tree/linear models have no global-pooling requirement, unlike
-# MiniRocket, so per-timestep windowed rows are a natural fit for them. --minirocket adds a
-# standalone whole-trajectory 4-class MiniRocket comparison (broadcast like --hybrid's stage 1,
-# --mode joint/all only) -- MiniRocket itself still only supports whole-series input.
+# MiniRocket, so per-timestep windowed rows are a natural fit for them. --minirocket runs
+# MiniRocket the same way: end-to-end per-timestep sequence classification (joint AND cascade)
+# over short trailing windows, one shared kernel transform feeding three ridge heads. See
+# runMiniRocketPerTimestep for why it is windowed rather than whole-trajectory.
 #
 # Class imbalance: --loss-scheme/--cb-beta/--focal-gamma reweight the loss (see
 # _infer_class_weights); --oversample instead reweights *sampling* -- the neural train_loader
@@ -90,6 +91,13 @@
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
 import argparse
+
+# MiniRocket per-timestep constants. Defined here (not beside the runner) because --minirocket-kernels
+# advertises the default in its help text and the strAdd stem block compares against it, both of which
+# execute at import time, long before the function definitions below.
+MINIROCKET_DEFAULT_KERNELS = 2500   # sktime rounds down to a multiple of 84 -> 2436
+MINIROCKET_WINDOW = 9               # MiniRocket's kernels are length 9; shorter windows are rejected
+MINIROCKET_CHUNK = 8192             # rows per transform/solve chunk -- caps peak memory, see _ridgeFit
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--no-lstm', dest="use_lstm", action='store_false', help='Use LSTM model')
@@ -176,7 +184,9 @@ parser.add_argument("--rf", dest="use_random_forest", action="store_true", help=
 parser.add_argument("--extratrees", dest="use_extra_trees", action="store_true", help="Enable Extra Trees per-timestep classic-ML comparison (disabled by default)")
 parser.add_argument("--pca", type=int, default=None, help="If set, PCA-reduce the Hankel-window features to this many components for the --mlp comparison (default: keep 95%% variance)")
 parser.add_argument("--mlp", dest="use_mlp", action="store_true", help="Enable PCA+MLP per-timestep comparison on Hankel-windowed rows (disabled by default)")
-parser.add_argument("--minirocket", dest="use_minirocket", action="store_true", help="Enable standalone whole-trajectory MiniRocket 4-class comparison, broadcast across timesteps (disabled by default; --mode joint/all only)")
+parser.add_argument("--minirocket", dest="use_minirocket", action="store_true", help="Enable per-timestep MiniRocket comparison over trailing windows -- supports joint, cascade and stage-solo modes like the other per-timestep backbones (disabled by default)")
+parser.add_argument("--minirocket-kernels", dest="minirocket_kernels", type=int, default=MINIROCKET_DEFAULT_KERNELS,
+                     help=f"MiniRocket kernel count for --minirocket (default {MINIROCKET_DEFAULT_KERNELS}; sktime rounds this down to a multiple of 84)")
 parser.add_argument("--loss-scheme", type=str, default="inverse", choices=["effective", "inverse"],
                      help="Per-timestep class weighting for CrossEntropy/focal loss. 'effective' (default): "
                           "class-balanced weights from the effective number of samples (Cui et al. 2019), which "
@@ -312,6 +322,7 @@ use_random_forest = args.use_random_forest
 use_extra_trees = args.use_extra_trees
 use_mlp = args.use_mlp
 use_minirocket = args.use_minirocket
+minirocketKernels = args.minirocket_kernels
 lossScheme = args.loss_scheme
 cbBeta = args.cb_beta
 focalGamma = args.focal_gamma
@@ -431,6 +442,10 @@ if physicsLossWeight > 0:
     strAdd = strAdd + f"PhysLoss{physicsLossWeight}_"
 if smoothMaxGap > 0:
     strAdd = strAdd + f"SmoothGap{smoothMaxGap}_"
+if use_minirocket and minirocketKernels != MINIROCKET_DEFAULT_KERNELS:
+    # Non-default kernel counts otherwise resolve to the same stem as the default run, and --save
+    # opens the log 'w' -- a sweep over kernel counts would silently truncate down to one log.
+    strAdd = strAdd + f"MRKernels{minirocketKernels}_"
 if evalTest and testSet == orbitType:
     # Only meaningful in-distribution: cross-orbit runs already evaluate on the held-out test split,
     # and they carry Test_<orbit>_ above, so tagging them too would split one arm across two names.
@@ -1102,17 +1117,33 @@ class LSTMSequenceClassifier(nn.Module):
 
 
 class MambaSequenceClassifier(nn.Module):
+    """Bi-directional Mamba: one forward scan and one over the time-reversed input, with the two
+    per-timestep hidden states concatenated before the classification head.
+
+    Mamba's selective scan is causal, which made this the ONLY backbone in the file that could not
+    see a thrust event's trailing edge when labelling a timestep inside it -- LSTMSequenceClassifier
+    sets bidirectional=True, TransformerSequenceClassifier applies no causal mask, and
+    InceptionModule convolves with symmetric padding=k//2. So every Mamba-vs-other comparison here
+    was partly a directionality comparison rather than an architecture one. The reverse scan removes
+    that confound. Two independent Mamba stacks (not one with shared weights) -- forward and
+    backward dynamics are genuinely different functions, and weight sharing would force one set of
+    SSM parameters to model both. Costs ~2x the parameters and ~2x the training time."""
     def __init__(self, config, input_size, hidden_size, num_layers, num_classes):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.mamba = Mamba(config)
-        self.fc = nn.Linear(hidden_size, num_classes)
+        self.mamba_rev = Mamba(config)
+        # config.d_inner (== expand_factor * d_model) is what a classifer=True Mamba returns per
+        # timestep; build_model picks expand_factor so that equals hidden_size, but read it off the
+        # config rather than re-deriving it here.
+        self.fc = nn.Linear(config.d_inner * 2, num_classes)
 
     def forward(self, x):
         """x: [batch_size, seq_length, input_size]"""
-        h_n = self.mamba(x)          # [B, T, hidden_size]
-        logits = self.fc(h_n)        # [B, T, num_classes]
+        fwd = self.mamba(x)                        # [B, T, d_inner]
+        rev = self.mamba_rev(x.flip(1)).flip(1)    # [B, T, d_inner], re-aligned to forward time
+        logits = self.fc(torch.cat([fwd, rev], dim=-1))   # [B, T, num_classes]
         return logits
 
 
@@ -2285,25 +2316,248 @@ def runPCAMLPCascade(train_data, train_joint, val_data, val_joint, eval_data, ev
 
 
 # ---------------------------------------------------------------------------
-# Standalone whole-trajectory MiniRocket baseline (--minirocket): a direct per-timestep-
-# comparable analog of the whole-trajectory script's 4-class --minirocket comparison. Only
-# supports joint mode -- one 4-class label per whole ~30-step trajectory, broadcast across every
-# timestep -- for the same reason 'hybrid' stage 1 is whole-trajectory (MiniRocket's PPV-pooling
-# transform is calibrated to and gets its power from the full series it's fit on).
+# Per-timestep MiniRocket baseline (--minirocket). Genuine end-to-end sequence classification in
+# both joint and cascade modes, at the same granularity as every other backbone here.
+#
+# Shape of the thing: each timestep gets the trailing MINIROCKET_WINDOW frames ending at it, so a
+# [N,T,C] batch becomes N*T short series; MiniRocket transforms those once, and three ridge heads
+# (joint 4-class, stage-1 binary, stage-2 3-class) are solved on that ONE feature matrix. The
+# transform is label-agnostic, so cascade is nearly free once joint exists -- only the K x n_class
+# right-hand side differs, the K x K Gram is shared.
+#
+# Two earlier claims in this file were wrong and are corrected here, both measured on
+# leo/30min-1500 with the IC-grouped split:
+#
+#  * "a windowed per-timestep version starves the kernels of signal, so stage 1 must be whole-
+#    trajectory." Window length is not what binds. Sweeping MINIROCKET_WINDOW over 9/15/21/30
+#    moves per-timestep macro-F1 by less than the seed-to-seed spread, and at 30 (the full
+#    trajectory, causally left-padded) it is no better than at 9. The real limit is that PPV
+#    pooling is a *summary statistic over the window* -- it answers "what fraction of this span
+#    exceeded a threshold", which is exactly right for typing a whole trajectory and structurally
+#    wrong for localizing an event to one timestep. Widening the window adds context and dilutes
+#    localization by the same amount, so the two cancel. Hence 9: the shortest window the kernels
+#    accept, and nothing is paid for a longer one.
+#
+#  * "MiniRocket only supports whole-series input, so joint only." It supports whatever series you
+#    hand it. What actually broke before was memory: materializing the N*T x K feature matrix and
+#    handing it to RidgeClassifierCV, which upcasts to float64 and runs generalized cross-
+#    validation over it. _ridgeFit below accumulates normal equations in chunks instead, so peak
+#    memory is O(MINIROCKET_CHUNK * K + K^2) and independent of N*T.
+#
+# What to expect: ~0.72 joint / ~0.80 cascade macro-F1 on OE+Energy at 2436 kernels, against ~0.93
+# / ~0.95 for the CNN, and at-chance on raw ECI. It is a deliberately informative baseline rather
+# than a competitive one -- the same transform scores 0.99 typing a whole trajectory, so the gap
+# between those two numbers is a clean measurement of what pooling costs on a localization task.
 # ---------------------------------------------------------------------------
-def trainMiniRocketJointDetector(train_data, train_joint, num_kernels=10000):
-    from sktime.classification.kernel_based import RocketClassifier
-    X_train = np.transpose(train_data, (0, 2, 1))     # [N,T,C] -> [N,C,T] sktime panel format
-    y_train = train_joint.max(axis=1).astype(np.int64)  # each trajectory's single class index
-    clf = RocketClassifier(num_kernels=num_kernels, rocket_transform='minirocket', n_jobs=-1)
-    clf.fit(X_train, y_train)
-    printMiniROCKETSize(clf)
-    return clf
+def _minirocketWindows(states, window=MINIROCKET_WINDOW):
+    """[N,T,C] -> (X[N*T, C, window] float32, idx[N*T, 2] of (ic, t)), ordered t-outer/ic-inner.
+
+    Left-edge-padded (the first frame repeated) so that EVERY timestep gets a real window and a
+    real prediction -- unlike buildHankelWindowRowsPerTimestep, which drops the first hankel_L-1
+    timesteps and forces them to background, and so has to pass valid_from=hankel_L-1 downstream.
+    Here valid_from stays 0. Padding costs accuracy on the leading frames (their windows are
+    largely a repeated constant), but that is a real cost of predicting them, not one hidden by
+    declining to."""
+    N, T, C = states.shape
+    padded = np.concatenate([np.repeat(states[:, :1], window - 1, axis=1), states], axis=1)
+    X = np.concatenate([padded[:, t:t + window, :].transpose(0, 2, 1) for t in range(T)])
+    idx = np.concatenate([np.stack([np.arange(N), np.full(N, t)], axis=1) for t in range(T)])
+    return X.astype(np.float32), idx
 
 
-def predictMiniRocketJointTrajectory(clf, data):
-    X = np.transpose(data, (0, 2, 1))
-    return np.asarray(clf.predict(X)).astype(np.int64)
+def _fitMiniRocketTransform(X, num_kernels, fit_sample=20000, seed=None):
+    """MiniRocket's fit only picks dilations and bias quantiles, which a sample estimates as well
+    as the full set does -- and fitting on all N*T windows is the slowest step by far. Sample
+    RANDOMLY, not by slicing: _minirocketWindows orders rows t-outer, so X[:n] would be every
+    window from the first few timesteps only, and bias quantiles would be calibrated to the start
+    of the trajectory.
+
+    random_state is threaded through to sktime, NOT just used for the subsample. MiniRocket draws
+    its bias quantiles from randomly chosen training examples, so leaving sktime's random_state at
+    None makes the whole backbone non-deterministic even under --seed: three runs at --seed 0
+    measured joint macro-F1 of 0.673 / 0.664 / 0.618, a spread wide enough to swamp the real
+    seed-to-seed spread the sweep's three seeds are meant to estimate."""
+    from sktime.transformations.panel.rocket import MiniRocketMultivariate
+    tf = MiniRocketMultivariate(num_kernels=num_kernels, n_jobs=-1, random_state=seed)
+    if len(X) > fit_sample:
+        pick = np.random.default_rng(seed).choice(len(X), fit_sample, replace=False)
+        X = X[np.sort(pick)]
+    tf.fit(X)
+    return tf
+
+
+def _minirocketFeatures(tf, X, n_feat):
+    """Chunked transform -> [M, n_feat+1] float32. The trailing all-ones column is the ridge
+    intercept, kept as a feature so _ridgeFit needs no separate centering pass."""
+    F = np.empty((len(X), n_feat + 1), dtype=np.float32)
+    F[:, -1] = 1.0
+    for i in range(0, len(X), MINIROCKET_CHUNK):
+        F[i:i + MINIROCKET_CHUNK, :n_feat] = tf.transform(X[i:i + MINIROCKET_CHUNK]).to_numpy(dtype=np.float32)
+    return F
+
+
+def _ridgeFit(F, targets, alpha=1.0):
+    """Ridge regression onto one-hot targets, accumulated chunk by chunk.
+
+    Equivalent to sklearn's RidgeClassifier on this problem, but never holds more than one chunk in
+    float64: G is K x K and each B is K x n_class, all independent of the row count. That is the
+    whole reason this backbone can run per-timestep at all -- see the module comment above.
+
+    targets: list of (y, num_classes) sharing F's rows -> list of coefficient matrices. Several
+    heads are passed together because G = F^T F depends only on F, so fitting the joint 4-class and
+    stage-1 binary heads separately would build the same ~2437 x 2437 matrix twice -- measured at
+    ~124s each on a 126k-row 30-minute cell, i.e. the dominant cost of the whole backbone. Only the
+    B accumulation is per-head, and that is a K x n_class GEMM. Stage 2 still needs its own call:
+    it is supervised on the thrust-frame subset, so its G is genuinely a different matrix."""
+    P = F.shape[1]
+    G = np.zeros((P, P))
+    Bs = [np.zeros((P, n)) for _, n in targets]
+    for i in range(0, len(F), MINIROCKET_CHUNK):
+        Fb = F[i:i + MINIROCKET_CHUNK].astype(np.float64)
+        G += Fb.T @ Fb
+        for B, (y, n) in zip(Bs, targets):
+            yb = y[i:i + MINIROCKET_CHUNK]
+            Y = np.zeros((len(yb), n))
+            Y[np.arange(len(yb)), yb] = 1.0
+            B += Fb.T @ Y
+    G[np.diag_indices(P - 1)] += alpha      # last column is the intercept -- leave it unpenalised
+    return [np.linalg.solve(G, B) for B in Bs]
+
+
+def _ridgePredict(F, W):
+    return np.concatenate([(F[i:i + MINIROCKET_CHUNK].astype(np.float64) @ W).argmax(axis=1)
+                           for i in range(0, len(F), MINIROCKET_CHUNK)])
+
+
+def _minirocketGrid(n, t, idx, flat):
+    """Scatter flat per-row predictions back to an [N,T] grid."""
+    grid = np.zeros((n, t), dtype=np.int64)
+    grid[idx[:, 0], idx[:, 1]] = flat
+    return grid
+
+
+def printMiniRocketRidgeSize(tf, head):
+    """Matches printMiniROCKETSize's block format so the log parser reads it the same way. Counts
+    ridge coefficients only -- MiniRocket's kernels are fixed, not learned, so they are not
+    parameters in the sense the other backbones' counts mean."""
+    import pickle
+    size_bytes = len(pickle.dumps(tf)) + head.nbytes
+    print("\n==========================================================================================")
+    print(f"Total parameters: {head.size}")
+    print(f"Total memory (bytes): {size_bytes}")
+    print(f"Total memory (MB): {size_bytes / (1024 ** 2):.4f}")
+    print("==========================================================================================")
+
+
+def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad_idx, num_kernels,
+                              run_joint, run_cascade, run_stage1_solo, run_stage2_solo,
+                              smooth_max_gap=0):
+    """One shared windowed MiniRocket transform, then a ridge head per requested mode."""
+    train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
+    eval_stage1, _ = _deriveStage1Stage2(eval_joint, pad_idx)
+    N_eval, T_eval = eval_joint.shape
+
+    print(f"\nBuilding MiniRocket windows (length {MINIROCKET_WINDOW}, stride 1, left-padded)")
+    X_train, idx_train = _minirocketWindows(train_data)
+    X_eval, idx_eval = _minirocketWindows(eval_data)
+    print(f"  train rows {X_train.shape}, eval rows {X_eval.shape}")
+
+    tTf = timer()
+    tf = _fitMiniRocketTransform(X_train, num_kernels, seed=runSeed)
+    n_feat = tf.transform(X_train[:2]).shape[1]
+    print(f"  requested {num_kernels} kernels -> sktime produced {n_feat} features")
+    F_train = _minirocketFeatures(tf, X_train, n_feat)
+    F_eval = _minirocketFeatures(tf, X_eval, n_feat)
+    tTf.tocStr("MiniRocket Transform Time (shared by all modes)")
+    del X_train, X_eval
+
+    y_train_joint = train_joint[idx_train[:, 0], idx_train[:, 1]]
+    y_train_stage1 = train_stage1[idx_train[:, 0], idx_train[:, 1]]
+    y_eval_joint_flat = eval_joint[idx_eval[:, 0], idx_eval[:, 1]]
+    thrust = y_train_joint > 0     # stage 2 is only ever supervised on thrusting frames
+
+    # One pass over F_train fits every head supervised on ALL rows (joint, stage 1) -- see _ridgeFit
+    # for why they are batched rather than fitted separately.
+    #
+    # The log parser (displaySeqLogData.RE_ENTER / iter_blocks) slices the log into blocks running
+    # from one "Entering <X> Training[ Loop]" line to the next, and attributes everything in a
+    # block to that X. So each head's "Entering" line must be IMMEDIATELY followed by that head's
+    # own output and nothing else -- printing both up front, as an earlier version did, put the
+    # joint metrics inside the stage-1 block and lost the joint row entirely. The shared fit
+    # therefore runs first, unannounced, and each block is emitted where its results are.
+    want_s1 = run_cascade or run_stage1_solo
+    heads = ([(y_train_joint, 4)] if run_joint else []) + ([(y_train_stage1, 2)] if want_s1 else [])
+    W_joint = W_s1 = None
+    if heads:
+        tFit = timer()
+        fitted = _ridgeFit(F_train, heads)
+        if run_joint:
+            W_joint = fitted.pop(0)
+        if want_s1:
+            W_s1 = fitted[0]
+
+    if run_joint:
+        print("\nEntering MiniRocket (joint) Training Loop")
+        tFit.tocStr("MiniRocket (joint) Training Time"
+                    + (" [shared ridge pass, also solves stage 1]" if want_s1 else ""))
+        printMiniRocketRidgeSize(tf, W_joint)
+
+        print("\nMiniRocket (joint) Validation")
+        tInf = timer()
+        pred_joint = _ridgePredict(F_eval, W_joint)
+        _reportFromPredictions(y_eval_joint_flat, pred_joint, JOINT_CLASS_NAMES, print_report=True)
+        tInf.tocStr("MiniRocket (joint) Inference Time")
+        _reportEventLevelWithSmoothing(eval_joint, _minirocketGrid(N_eval, T_eval, idx_eval, pred_joint),
+                                        JOINT_CLASS_NAMES, smooth_max_gap=smooth_max_gap,
+                                        plot_name="MiniRocket",
+                                        plot_save_path=os.path.join(plotLoc, f"seqpred_MiniRocket_joint_{logStem}.png"),
+                                        mode_label="Joint", valid_from=0)
+
+    if want_s1:
+        # "(standalone)" in solo mode, "(Detector)" in cascade mode: classify_component keys
+        # Stage1_solo vs Stage1 off exactly that parenthetical.
+        print("\nEntering MiniRocket Stage 1 "
+              + ("(standalone)" if run_stage1_solo else "(Detector)") + " Training Loop")
+        if run_joint:
+            print("(coefficients came from the joint pass above -- same rows, same Gram)")
+        else:
+            tFit.tocStr("MiniRocket Stage 1 Training Time")
+        printMiniRocketRidgeSize(tf, W_s1)
+        if run_stage1_solo:
+            print("\nMiniRocket Stage 1 (standalone) Validation")
+            _reportFromPredictions((y_eval_joint_flat > 0).astype(np.int64), _ridgePredict(F_eval, W_s1),
+                                    STAGE1_CLASS_NAMES, print_report=True)
+        # In cascade mode stage 1 carries no metrics of its own -- it is scored inside
+        # combineCascadePredictions below, exactly as runClassicCascade's stage-1 block is.
+
+    if run_cascade or run_stage2_solo:
+        print("\nEntering MiniRocket Stage 2 "
+              + ("(standalone)" if run_stage2_solo else "(Type Classifier)") + " Training Loop")
+        t = timer()
+        W_s2 = _ridgeFit(F_train[thrust], [(y_train_joint[thrust] - 1, 3)])[0]
+        t.toc()
+        printMiniRocketRidgeSize(tf, W_s2)
+
+        # Standalone stage-2 score, on true-thrust frames only. Same reason runClassicCascade does
+        # it: without this, stage 2 is only ever seen gated through stage 1, and a weak cascade is
+        # not diagnosable as bad detection vs. bad typing. The header is word-for-word what
+        # RE_STAGE2_STANDALONE_HDR matches -- reword it and the cascade_stage2_standalone row
+        # silently disappears from the parsed CSVs.
+        print("\nMiniRocket Stage 2 (Type Classifier) Standalone Validation")
+        mask = y_eval_joint_flat > 0
+        _reportFromPredictions(y_eval_joint_flat[mask] - 1, _ridgePredict(F_eval[mask], W_s2),
+                                STAGE2_CLASS_NAMES, print_report=True)
+
+    if run_cascade:
+        print("\nMiniRocket Cascade Evaluation")
+        tInf = timer()
+        g1 = _minirocketGrid(N_eval, T_eval, idx_eval, _ridgePredict(F_eval, W_s1))
+        g2 = _minirocketGrid(N_eval, T_eval, idx_eval, _ridgePredict(F_eval, W_s2))
+        combineCascadePredictions(eval_joint, eval_stage1, g1, g2, print_report=True,
+                                   plot_name="MiniRocket",
+                                   plot_save_path=os.path.join(plotLoc, f"seqpred_MiniRocket_cascade_{logStem}.png"),
+                                   valid_from=0, smooth_max_gap=smooth_max_gap)
+        tInf.tocStr("MiniRocket Cascade Inference Time")
 
 
 def main():
@@ -2601,27 +2855,15 @@ def main():
                              hankel_L, -100, pca_n_components, device, num_epochs)
 
     if use_minirocket:
-        print(f"\n{'='*80}\nBackbone: MINIROCKET (whole-trajectory, broadcast)\n{'='*80}")
-        if run_joint:
-            print("\nEntering MiniRocket (whole-trajectory, Joint 4-class) Training")
-            mrTimer = timer()
-            mr_clf = trainMiniRocketJointDetector(train_data, train_joint)
-            mrTimer.tocStr("MiniRocket Joint Training Time")
-
-            print("\nMiniRocket Joint Validation")
-            mrInf = timer()
-            pred_traj = predictMiniRocketJointTrajectory(mr_clf, eval_data)
-            T = eval_data.shape[1]
-            pred_bcast = np.repeat(pred_traj[:, None], T, axis=1)
-            _reportFromPredictions(eval_joint.reshape(-1), pred_bcast.reshape(-1), JOINT_CLASS_NAMES, print_report=True)
-            _eventLevelReport(eval_joint, pred_bcast, JOINT_CLASS_NAMES,
-                               granularity_note="whole-trajectory MiniRocket decision broadcast across "
-                                                 "every timestep -- recall here is whole-trajectory "
-                                                 "detection, not per-event localization.")
-            mrInf.tocStr("MiniRocket Joint Inference Time")
+        print(f"\n{'='*80}\nBackbone: MINIROCKET (per-timestep, windowed)\n{'='*80}")
+        if train_data.shape[1] < MINIROCKET_WINDOW:
+            print(f"[skip] MINIROCKET needs at least {MINIROCKET_WINDOW} timesteps per trajectory "
+                  f"(kernel length); this run has {train_data.shape[1]}.")
         else:
-            print("[note] MINIROCKET only supports --mode joint/all (whole-trajectory 4-class "
-                  "classifier, broadcast across timesteps); no stage1/stage2/cascade form.")
+            runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, -100,
+                                      minirocketKernels, run_joint, run_cascade,
+                                      run_stage1_solo, run_stage2_solo,
+                                      smooth_max_gap=smoothMaxGap)
 
 
 if __name__ == "__main__":
