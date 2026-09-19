@@ -2386,37 +2386,58 @@ def _fitMiniRocketTransform(X, num_kernels, fit_sample=20000, seed=None):
     return tf
 
 
-def _minirocketFeatures(tf, X, n_feat):
-    """Chunked transform -> [M, n_feat+1] float32. The trailing all-ones column is the ridge
-    intercept, kept as a feature so _ridgeFit needs no separate centering pass."""
-    F = np.empty((len(X), n_feat + 1), dtype=np.float32)
-    F[:, -1] = 1.0
+def _minirocketChunks(tf, X, n_feat, mask=None):
+    """Stream the transform: yield (chunk_start, F_chunk) with F_chunk [rows, n_feat+1] float32,
+    the trailing all-ones column being the ridge intercept (so no separate centering pass).
+
+    The full [M, n_feat+1] matrix is deliberately NEVER materialized. M = N*T grows with the
+    propagation window, and at T=100 that is 420k x 2437 float32 = 3.8 GB for train alone, plus
+    ~1.1 GB more for a thrust-only stage-2 copy and 0.8 GB for eval -- ~5.7 GB live at once. On a
+    16 GB host, where MiniRocket runs LAST and so pays for the four class datasets, the torch/CUDA
+    context and four already-trained neural backbones still being resident, that is an OOM kill.
+    At T=30 the same arrays are 1.7 GB and fit, which is why only the 100-minute cells died.
+
+    Re-running the transform once per pass costs ~6s at T=100 against ~125s for the ridge solve it
+    feeds, so streaming is close to free. Peak is now one chunk: ~80 MB float32 plus its float64
+    copy, independent of M.
+
+    mask: optional [M] boolean. Rows are still transformed a full chunk at a time (simpler, and
+    still bounded) but only the kept rows are yielded; fully-masked chunks are skipped."""
     for i in range(0, len(X), MINIROCKET_CHUNK):
-        F[i:i + MINIROCKET_CHUNK, :n_feat] = tf.transform(X[i:i + MINIROCKET_CHUNK]).to_numpy(dtype=np.float32)
-    return F
+        sl = slice(i, i + MINIROCKET_CHUNK)
+        keep = None
+        if mask is not None:
+            keep = mask[sl]
+            if not keep.any():
+                continue
+        block = tf.transform(X[sl]).to_numpy(dtype=np.float32)
+        F = np.empty((len(block), n_feat + 1), dtype=np.float32)
+        F[:, :n_feat] = block
+        F[:, -1] = 1.0
+        yield i, (F[keep] if keep is not None else F)
 
 
-def _ridgeFit(F, targets, alpha=1.0):
-    """Ridge regression onto one-hot targets, accumulated chunk by chunk.
+def _ridgeFit(tf, X, n_feat, targets, mask=None, alpha=1.0):
+    """Ridge regression onto one-hot targets, accumulated chunk by chunk over a streamed transform.
 
     Equivalent to sklearn's RidgeClassifier on this problem, but never holds more than one chunk in
-    float64: G is K x K and each B is K x n_class, all independent of the row count. That is the
-    whole reason this backbone can run per-timestep at all -- see the module comment above.
+    float64: G is K x K and each B is K x n_class, both independent of the row count.
 
-    targets: list of (y, num_classes) sharing F's rows -> list of coefficient matrices. Several
-    heads are passed together because G = F^T F depends only on F, so fitting the joint 4-class and
+    targets: list of (y, num_classes) over X's rows -> list of coefficient matrices. Several heads
+    are passed together because G = F^T F depends only on F, so fitting the joint 4-class and
     stage-1 binary heads separately would build the same ~2437 x 2437 matrix twice -- measured at
     ~124s each on a 126k-row 30-minute cell, i.e. the dominant cost of the whole backbone. Only the
     B accumulation is per-head, and that is a K x n_class GEMM. Stage 2 still needs its own call:
-    it is supervised on the thrust-frame subset, so its G is genuinely a different matrix."""
-    P = F.shape[1]
+    masked to the thrust-frame subset, its G is genuinely a different matrix."""
+    P = n_feat + 1
     G = np.zeros((P, P))
     Bs = [np.zeros((P, n)) for _, n in targets]
-    for i in range(0, len(F), MINIROCKET_CHUNK):
-        Fb = F[i:i + MINIROCKET_CHUNK].astype(np.float64)
+    for i, F in _minirocketChunks(tf, X, n_feat, mask):
+        Fb = F.astype(np.float64)
         G += Fb.T @ Fb
+        sl = slice(i, i + MINIROCKET_CHUNK)
         for B, (y, n) in zip(Bs, targets):
-            yb = y[i:i + MINIROCKET_CHUNK]
+            yb = y[sl][mask[sl]] if mask is not None else y[sl]
             Y = np.zeros((len(yb), n))
             Y[np.arange(len(yb)), yb] = 1.0
             B += Fb.T @ Y
@@ -2424,9 +2445,16 @@ def _ridgeFit(F, targets, alpha=1.0):
     return [np.linalg.solve(G, B) for B in Bs]
 
 
-def _ridgePredict(F, W):
-    return np.concatenate([(F[i:i + MINIROCKET_CHUNK].astype(np.float64) @ W).argmax(axis=1)
-                           for i in range(0, len(F), MINIROCKET_CHUNK)])
+def _ridgePredict(tf, X, n_feat, Ws, mask=None):
+    """One streamed pass, every head predicted from it -> list of flat label arrays, one per W.
+    Batched for the same reason _ridgeFit batches heads: the transform, not the matmul, is what a
+    second pass would repeat."""
+    outs = [[] for _ in Ws]
+    for _, F in _minirocketChunks(tf, X, n_feat, mask):
+        Fb = F.astype(np.float64)
+        for o, W in zip(outs, Ws):
+            o.append((Fb @ W).argmax(axis=1))
+    return [np.concatenate(o) if o else np.zeros(0, dtype=np.int64) for o in outs]
 
 
 def _minirocketGrid(n, t, idx, flat):
@@ -2452,7 +2480,12 @@ def printMiniRocketRidgeSize(tf, head):
 def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad_idx, num_kernels,
                               run_joint, run_cascade, run_stage1_solo, run_stage2_solo,
                               smooth_max_gap=0):
-    """One shared windowed MiniRocket transform, then a ridge head per requested mode."""
+    """One shared windowed MiniRocket transform, then a ridge head per requested mode.
+
+    Every head is fitted BEFORE any is reported, and all eval predictions come from a single
+    streamed pass, so the printed blocks below are pure reporting. That ordering is forced by
+    memory, not style: features are never stored (see _minirocketChunks), so interleaving fit and
+    report would re-transform the data once per report."""
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
     eval_stage1, _ = _deriveStage1Stage2(eval_joint, pad_idx)
     N_eval, T_eval = eval_joint.shape
@@ -2466,47 +2499,65 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
     tf = _fitMiniRocketTransform(X_train, num_kernels, seed=runSeed)
     n_feat = tf.transform(X_train[:2]).shape[1]
     print(f"  requested {num_kernels} kernels -> sktime produced {n_feat} features")
-    F_train = _minirocketFeatures(tf, X_train, n_feat)
-    F_eval = _minirocketFeatures(tf, X_eval, n_feat)
-    tTf.tocStr("MiniRocket Transform Time (shared by all modes)")
-    del X_train, X_eval
+    tTf.tocStr("MiniRocket Transform Fit Time")
 
     y_train_joint = train_joint[idx_train[:, 0], idx_train[:, 1]]
     y_train_stage1 = train_stage1[idx_train[:, 0], idx_train[:, 1]]
     y_eval_joint_flat = eval_joint[idx_eval[:, 0], idx_eval[:, 1]]
     thrust = y_train_joint > 0     # stage 2 is only ever supervised on thrusting frames
+    # Full-length stage-2 target. Only the `thrust` rows are ever read, but keeping it full-length
+    # lets _ridgeFit slice it with the same chunk bounds as the mask, instead of materializing a
+    # thrust-only feature subset (1.1 GB at T=100).
+    y_train_stage2 = np.maximum(y_train_joint - 1, 0)
 
-    # One pass over F_train fits every head supervised on ALL rows (joint, stage 1) -- see _ridgeFit
-    # for why they are batched rather than fitted separately.
-    #
-    # The log parser (displaySeqLogData.RE_ENTER / iter_blocks) slices the log into blocks running
-    # from one "Entering <X> Training[ Loop]" line to the next, and attributes everything in a
-    # block to that X. So each head's "Entering" line must be IMMEDIATELY followed by that head's
-    # own output and nothing else -- printing both up front, as an earlier version did, put the
-    # joint metrics inside the stage-1 block and lost the joint row entirely. The shared fit
-    # therefore runs first, unannounced, and each block is emitted where its results are.
     want_s1 = run_cascade or run_stage1_solo
+    want_s2 = run_cascade or run_stage2_solo
+    W_joint = W_s1 = W_s2 = None
+
+    # Pass 1: every head supervised on ALL rows (joint, stage 1) -- batched because they share
+    # G = F^T F; see _ridgeFit.
     heads = ([(y_train_joint, 4)] if run_joint else []) + ([(y_train_stage1, 2)] if want_s1 else [])
-    W_joint = W_s1 = None
     if heads:
         tFit = timer()
-        fitted = _ridgeFit(F_train, heads)
+        fitted = _ridgeFit(tf, X_train, n_feat, heads)
+        fit_s = tFit.tocVal()   # tocVal, not toc: toc() also prints, which would emit a
+        # stray timing line before the 'Entering' block the parser attributes it to.
         if run_joint:
             W_joint = fitted.pop(0)
         if want_s1:
             W_s1 = fitted[0]
 
+    # Pass 2: stage 2, masked to thrust frames -- a different row set, hence a different Gram.
+    if want_s2:
+        tFit2 = timer()
+        W_s2 = _ridgeFit(tf, X_train, n_feat, [(y_train_stage2, 3)], mask=thrust)[0]
+        fit2_s = tFit2.tocVal()
+
+    # Pass 3: one streamed pass over the eval windows produces every head's predictions; the
+    # reports below only index into them.
+    tInf = timer()
+    order = [W for W in (W_joint, W_s1, W_s2) if W is not None]
+    preds = _ridgePredict(tf, X_eval, n_feat, order) if order else []
+    pred_joint = preds.pop(0) if W_joint is not None else None
+    pred_s1 = preds.pop(0) if W_s1 is not None else None
+    pred_s2 = preds.pop(0) if W_s2 is not None else None
+    tInf.tocStr("MiniRocket Inference Time (all heads, one transform pass)")
+    del X_train, X_eval
+
+    # --- reporting only from here on ---------------------------------------------------------
+    # The log parser (displaySeqLogData.RE_ENTER / iter_blocks) slices the log into blocks running
+    # from one "Entering <X> Training[ Loop]" line to the next and attributes everything in a block
+    # to that X. So each head's "Entering" line must be immediately followed by that head's own
+    # output and nothing else -- printing two of them back to back, as an earlier version did, put
+    # the joint metrics inside the stage-1 block and dropped the joint row entirely.
     if run_joint:
         print("\nEntering MiniRocket (joint) Training Loop")
-        tFit.tocStr("MiniRocket (joint) Training Time"
-                    + (" [shared ridge pass, also solves stage 1]" if want_s1 else ""))
+        print(f"\tElapsed time is {fit_s:.4f} seconds."
+              + ("  [shared ridge pass, also solves stage 1]" if want_s1 else ""))
         printMiniRocketRidgeSize(tf, W_joint)
 
         print("\nMiniRocket (joint) Validation")
-        tInf = timer()
-        pred_joint = _ridgePredict(F_eval, W_joint)
         _reportFromPredictions(y_eval_joint_flat, pred_joint, JOINT_CLASS_NAMES, print_report=True)
-        tInf.tocStr("MiniRocket (joint) Inference Time")
         _reportEventLevelWithSmoothing(eval_joint, _minirocketGrid(N_eval, T_eval, idx_eval, pred_joint),
                                         JOINT_CLASS_NAMES, smooth_max_gap=smooth_max_gap,
                                         plot_name="MiniRocket",
@@ -2521,21 +2572,19 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
         if run_joint:
             print("(coefficients came from the joint pass above -- same rows, same Gram)")
         else:
-            tFit.tocStr("MiniRocket Stage 1 Training Time")
+            print(f"\tElapsed time is {fit_s:.4f} seconds.")
         printMiniRocketRidgeSize(tf, W_s1)
         if run_stage1_solo:
             print("\nMiniRocket Stage 1 (standalone) Validation")
-            _reportFromPredictions((y_eval_joint_flat > 0).astype(np.int64), _ridgePredict(F_eval, W_s1),
+            _reportFromPredictions((y_eval_joint_flat > 0).astype(np.int64), pred_s1,
                                     STAGE1_CLASS_NAMES, print_report=True)
         # In cascade mode stage 1 carries no metrics of its own -- it is scored inside
         # combineCascadePredictions below, exactly as runClassicCascade's stage-1 block is.
 
-    if run_cascade or run_stage2_solo:
+    if want_s2:
         print("\nEntering MiniRocket Stage 2 "
               + ("(standalone)" if run_stage2_solo else "(Type Classifier)") + " Training Loop")
-        t = timer()
-        W_s2 = _ridgeFit(F_train[thrust], [(y_train_joint[thrust] - 1, 3)])[0]
-        t.toc()
+        print(f"\tElapsed time is {fit2_s:.4f} seconds.")
         printMiniRocketRidgeSize(tf, W_s2)
 
         # Standalone stage-2 score, on true-thrust frames only. Same reason runClassicCascade does
@@ -2545,19 +2594,19 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
         # silently disappears from the parsed CSVs.
         print("\nMiniRocket Stage 2 (Type Classifier) Standalone Validation")
         mask = y_eval_joint_flat > 0
-        _reportFromPredictions(y_eval_joint_flat[mask] - 1, _ridgePredict(F_eval[mask], W_s2),
+        _reportFromPredictions(y_eval_joint_flat[mask] - 1, pred_s2[mask],
                                 STAGE2_CLASS_NAMES, print_report=True)
 
     if run_cascade:
         print("\nMiniRocket Cascade Evaluation")
-        tInf = timer()
-        g1 = _minirocketGrid(N_eval, T_eval, idx_eval, _ridgePredict(F_eval, W_s1))
-        g2 = _minirocketGrid(N_eval, T_eval, idx_eval, _ridgePredict(F_eval, W_s2))
+        tCasc = timer()
+        g1 = _minirocketGrid(N_eval, T_eval, idx_eval, pred_s1)
+        g2 = _minirocketGrid(N_eval, T_eval, idx_eval, pred_s2)
         combineCascadePredictions(eval_joint, eval_stage1, g1, g2, print_report=True,
                                    plot_name="MiniRocket",
                                    plot_save_path=os.path.join(plotLoc, f"seqpred_MiniRocket_cascade_{logStem}.png"),
                                    valid_from=0, smooth_max_gap=smooth_max_gap)
-        tInf.tocStr("MiniRocket Cascade Inference Time")
+        tCasc.tocStr("MiniRocket Cascade Inference Time")
 
 
 def main():
