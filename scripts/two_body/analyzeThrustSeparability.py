@@ -44,6 +44,10 @@ parser.add_argument("--systems", type=int, default=1500)
 parser.add_argument("--propMins", type=int, nargs="+", default=[10, 30, 100],
                      help="Propagation windows to compare (each must exist on disk)")
 parser.add_argument("--plot", action="store_true", help="Save distribution figure")
+parser.add_argument("--fontScale", type=float, default=1.0,
+                     help="Multiplier on every font size in the saved figures. The figure canvas "
+                          "stays the same size, so >1 makes text larger relative to the panels "
+                          "(what a two-column manuscript needs after \\includegraphics shrinks it).")
 args = parser.parse_args()
 
 # Import the main script for its loaders/physics. It parses argv at import time, so swap in a
@@ -222,13 +226,57 @@ def main():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        windows = list(all_pops.keys())
-        fig, axes = plt.subplots(2, len(windows), figsize=(5.2 * len(windows), 7.5), squeeze=False)
+        # Every size lives here, scaled by one knob, so the relative hierarchy (suptitle > panel
+        # title > label > tick > annotation) survives whatever --fontScale is asked for.
+        FS = args.fontScale
+        plt.rcParams.update({
+            "font.size": 10 * FS,
+            "axes.titlesize": 10 * FS,
+            "axes.labelsize": 10 * FS,
+            "xtick.labelsize": 9 * FS,
+            "ytick.labelsize": 9 * FS,
+            "legend.fontsize": 8 * FS,
+            "figure.titlesize": 12 * FS,
+        })
 
+        windows = list(all_pops.keys())
+        plot_dir = f"gmat/data/seqClassification/{args.orbit}"
+        os.makedirs(plot_dir, exist_ok=True)
+        run_label = f"{args.orbit.upper()}, {args.systems} systems"
+
+        # One figure per view rather than a single stacked 2-row grid. The two views answer
+        # different questions (is any single minute detectable, vs. does the signal integrate up
+        # over the window), so they get referenced and captioned independently -- each has to stand
+        # alone as its own \includegraphics rather than as "the top row of".
+        def newRow():
+            fig, axes = plt.subplots(1, len(windows), figsize=(5.2 * len(windows), 4.4), squeeze=False)
+            return fig, axes[0]
+
+        def finishAxis(ax, j):
+            ax.set_ylabel("density" if j == 0 else "")
+            ax.grid(alpha=0.25, linewidth=0.6)
+            ax.set_axisbelow(True)
+            for side in ("top", "right"):
+                ax.spines[side].set_visible(False)
+            if j == 0:
+                ax.legend(frameon=False)
+
+        def saveRow(fig, view, title):
+            fig.suptitle(title)
+            fig.tight_layout()
+            path = os.path.join(plot_dir, f"separability_{view}_{args.orbit}_{args.systems}.pdf")
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            print(f"Saved {view} separability figure -> {path}")
+
+        print()
+
+        # ---- View 1: instantaneous, per-frame residual_accel ----
+        fig, axs = newRow()
         for j, pm in enumerate(windows):
             pops, s = all_pops[pm], all_summary[pm]
 
-            ax = axes[0][j]
+            ax = axs[j]
             for name in ("No Thrust", "Electric", "Chemical"):
                 d = pops[name]
                 d = d[d > 0]
@@ -236,22 +284,21 @@ def main():
                         color=COLORS[name], label=name)
             ax.axvline(np.log10(s["med_aJ2"]), color="black", lw=1.2, ls="--")
             ax.text(np.log10(s["med_aJ2"]), ax.get_ylim()[1] * 0.96, " a_J2",
-                    fontsize=8, va="top", color="black")
+                    fontsize=8 * FS, va="top", color="black")
             ax.axvline(np.log10(s["med_aJ36"]), color="black", lw=1.2, ls=":")
             ax.text(np.log10(s["med_aJ36"]), ax.get_ylim()[1] * 0.96, " a_J3-J6",
-                    fontsize=8, va="top", color="black")
-            ax.set_title(f"{pm} min -- per-frame residual\nElectric vs NoThrust AUC = {s['auc_elec_inst']:.3f}",
-                         fontsize=10)
+                    fontsize=8 * FS, va="top", color="black")
+            ax.set_title(f"{pm} min: per-frame residual\nElectric vs NoThrust AUC = {s['auc_elec_inst']:.3f}")
             ax.set_xlabel("log10 residual_accel  (km/s$^2$)")
-            ax.set_ylabel("density" if j == 0 else "")
-            ax.grid(alpha=0.25, linewidth=0.6)
-            ax.set_axisbelow(True)
-            for side in ("top", "right"):
-                ax.spines[side].set_visible(False)
-            if j == 0:
-                ax.legend(fontsize=8, frameon=False)
+            finishAxis(ax, j)
+        saveRow(fig, "instantaneous", f"Instantaneous Per-Frame Thrust Residual: {run_label}")
 
-            ax = axes[1][j]
+        # ---- View 2: cumulative, signed dE per trajectory ----
+        fig, axs = newRow()
+        for j, pm in enumerate(windows):
+            pops, s = all_pops[pm], all_summary[pm]
+
+            ax = axs[j]
             # Signed, on a linear axis clipped to the bulk: the message is the SHIFT of Electric
             # off a NoThrust distribution centred on zero, which a log-of-absolute-value axis would
             # destroy by folding the negative half onto the positive.
@@ -262,26 +309,13 @@ def main():
                 ax.hist(np.clip(pops["cum:" + name], lo, hi), bins=bins, density=True, alpha=0.55,
                         color=COLORS[name], label=name)
             ax.axvline(0.0, color="black", lw=1.0, ls="--")
-            ax.set_title(f"{pm} min ({s['orbits']:.2f} orbits) -- signed $\\Delta$E per trajectory\n"
-                         f"Electric vs NoThrust AUC = {s['auc_elec_cum']:.3f}", fontsize=10)
+            # "per trajectory" is already in the suptitle; leaving it here overruns the panel at
+            # larger --fontScale.
+            ax.set_title(f"{pm} min ({s['orbits']:.2f} orbits): signed $\\Delta$E\n"
+                         f"Electric vs NoThrust AUC = {s['auc_elec_cum']:.3f}")
             ax.set_xlabel("$\\Delta$E  (km$^2$/s$^2$)")
-            ax.set_ylabel("density" if j == 0 else "")
-            ax.grid(alpha=0.25, linewidth=0.6)
-            ax.set_axisbelow(True)
-            for side in ("top", "right"):
-                ax.spines[side].set_visible(False)
-            if j == 0:
-                ax.legend(fontsize=8, frameon=False)
-
-        fig.suptitle(f"Thrust separability in the data alone -- {args.orbit}, {args.systems} systems "
-                     f"(no model, no measurement noise)", fontsize=12)
-        fig.tight_layout()
-
-        plot_dir = f"gmat/data/seqClassification/{args.orbit}"
-        os.makedirs(plot_dir, exist_ok=True)
-        save_path = os.path.join(plot_dir, f"separability_{args.orbit}_{args.systems}.png")
-        fig.savefig(save_path, dpi=150)
-        print(f"\nSaved separability figure -> {save_path}")
+            finishAxis(ax, j)
+        saveRow(fig, "cumulative", f"Cumulative Signed $\\Delta$E Per Trajectory: {run_label}")
 
 
 if __name__ == "__main__":
