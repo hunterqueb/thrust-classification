@@ -1,0 +1,27 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc ccc ccc ccc ccc}
+\toprule
+ & \multicolumn{9}{c}{\textbf{Joint}} & \multicolumn{9}{c}{\textbf{Cascade}} \\
+\cmidrule(lr){2-10}\cmidrule(lr){11-19}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}\cmidrule(lr){14-16}\cmidrule(lr){17-19}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{LightGBM} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{68D060}0.72 & \cellcolor[HTML]{51CF66}0.97 & \cellcolor[HTML]{51CF66}0.81 & \cellcolor[HTML]{51CF66}0.94 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}0.99 \\
+\textbf{MiniRocket} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.97 & \cellcolor[HTML]{51CF66}0.97 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 \\
+\textbf{CNN} & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.95 & \cellcolor[HTML]{51CF66}0.95 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 \\
+\textbf{LSTM} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 \\
+\textbf{MAMBA} & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.95 & \cellcolor[HTML]{51CF66}0.95 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 \\
+\textbf{TRANSFORMER} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}1.00 & \cellcolor[HTML]{51CF66}\textbf{0.99} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class model and the end-to-end cascade, MEO train and test, OE + Acceleration Residual features, at 10/30/100 minutes. Mean over 3 seeds; per-seed spread in eval\_long.csv. Bold = best per approach/time/metric. Cell colour: red\,=\,low, green\,=\,high.}
+\label{tab:seq_meo_ladder_jc}
+\end{table}

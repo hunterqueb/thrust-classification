@@ -1,0 +1,29 @@
+\begin{table}
+\caption{Cross-regime transfer, min thrust class recall (30 min, OE + Energy). The mixed combined/leo-meo-geo dataset is excluded: it is 93\% LEO and 1390 of its 1500 ICs are identical to the standalone LEO set.}
+\label{tab:transfer_minrec}
+\begin{tabular}{llllll}
+\toprule
+ & arm & geo$\rightarrow$geo & geo$\rightarrow$leo & leo$\rightarrow$geo & leo$\rightarrow$leo \\
+model & eval_stage &  &  &  &  \\
+\midrule
+\multirow[t]{2}{*}{LightGBM} & cascade_end_to_end & 0.025 $\pm$ 0.005 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 \\
+ & joint_4class & 0.020 $\pm$ 0.010 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 \\
+\cline{1-6}
+\multirow[t]{2}{*}{MiniRocket} & cascade_end_to_end & 0.983 $\pm$ 0.010 & 0.147 $\pm$ 0.217 & 0.000 $\pm$ 0.000 & 0.491 $\pm$ 0.054 \\
+ & joint_4class & 0.984 $\pm$ 0.009 & 0.023 $\pm$ 0.027 & 0.000 $\pm$ 0.000 & 0.296 $\pm$ 0.216 \\
+\cline{1-6}
+\multirow[t]{2}{*}{CNN} & cascade_end_to_end & 0.982 $\pm$ 0.010 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.850 $\pm$ 0.028 \\
+ & joint_4class & 0.984 $\pm$ 0.007 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.880 $\pm$ 0.052 \\
+\cline{1-6}
+\multirow[t]{2}{*}{LSTM} & cascade_end_to_end & 0.977 $\pm$ 0.011 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.864 $\pm$ 0.004 \\
+ & joint_4class & 0.980 $\pm$ 0.005 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.929 $\pm$ 0.011 \\
+\cline{1-6}
+\multirow[t]{2}{*}{MAMBA} & cascade_end_to_end & 0.885 $\pm$ 0.028 & 0.011 $\pm$ 0.018 & 0.024 $\pm$ 0.041 & 0.482 $\pm$ 0.016 \\
+ & joint_4class & 0.855 $\pm$ 0.043 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.562 $\pm$ 0.052 \\
+\cline{1-6}
+\multirow[t]{2}{*}{TRANSFORMER} & cascade_end_to_end & 0.985 $\pm$ 0.008 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.533 $\pm$ 0.282 \\
+ & joint_4class & 0.986 $\pm$ 0.007 & 0.000 $\pm$ 0.000 & 0.000 $\pm$ 0.000 & 0.829 $\pm$ 0.029 \\
+\cline{1-6}
+\bottomrule
+\end{tabular}
+\end{table}

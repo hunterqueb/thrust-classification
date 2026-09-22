@@ -1,0 +1,27 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc ccc ccc ccc ccc}
+\toprule
+ & \multicolumn{9}{c}{\textbf{Joint}} & \multicolumn{9}{c}{\textbf{Cascade}} \\
+\cmidrule(lr){2-10}\cmidrule(lr){11-19}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}\cmidrule(lr){14-16}\cmidrule(lr){17-19}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{LightGBM} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF8460}0.31 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF7268}0.27 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.23 \\
+\textbf{MiniRocket} & \cellcolor[HTML]{FFBE45}\textbf{0.45} & \cellcolor[HTML]{FFC641}\textbf{0.47} & \cellcolor[HTML]{FFAD4D}\textbf{0.41} & \cellcolor[HTML]{FFBC46}\textbf{0.44} & \cellcolor[HTML]{FFA650}\textbf{0.39} & \cellcolor[HTML]{FFA152}\textbf{0.38} & \cellcolor[HTML]{FFA351}\textbf{0.38} & \cellcolor[HTML]{FF8B5D}\textbf{0.33} & \cellcolor[HTML]{FF875E}\textbf{0.32} & \cellcolor[HTML]{FFBD46}\textbf{0.45} & \cellcolor[HTML]{FFBB47}\textbf{0.44} & \cellcolor[HTML]{FFAB4E}\textbf{0.40} & \cellcolor[HTML]{FFB24B}\textbf{0.42} & \cellcolor[HTML]{FFC243}\textbf{0.46} & \cellcolor[HTML]{FF9B55}\textbf{0.36} & \cellcolor[HTML]{FFB24B}\textbf{0.42} & \cellcolor[HTML]{FF905A}\textbf{0.34} & \cellcolor[HTML]{FF865F}\textbf{0.31} \\
+\textbf{CNN} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 \\
+\textbf{LSTM} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6F69}0.26 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.09 & \cellcolor[HTML]{FF6C6A}0.25 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.08 & \cellcolor[HTML]{FF6F69}0.26 & \cellcolor[HTML]{FF6B6B}0.22 & \cellcolor[HTML]{FF6B6B}0.23 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.20 & \cellcolor[HTML]{FF6B6B}0.15 \\
+\textbf{MAMBA} & \cellcolor[HTML]{FF7965}0.28 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF6B6B}0.10 & \cellcolor[HTML]{FF6F69}0.26 & \cellcolor[HTML]{FF6B6B}0.22 & \cellcolor[HTML]{FF6B6B}0.15 & \cellcolor[HTML]{FF6D6A}0.26 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.05 & \cellcolor[HTML]{FF6B6B}0.22 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF6B6B}0.20 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6E69}0.26 & \cellcolor[HTML]{FF6B6B}0.24 & \cellcolor[HTML]{FF6B6B}0.09 \\
+\textbf{TRANSFORMER} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.18 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.08 & \cellcolor[HTML]{FF6B6B}0.10 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.19 & \cellcolor[HTML]{FF6B6B}0.21 & \cellcolor[HTML]{FF6E69}0.26 & \cellcolor[HTML]{FF6B6B}0.10 & \cellcolor[HTML]{FF6B6B}0.11 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.12 & \cellcolor[HTML]{FF6B6B}0.14 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.12 & \cellcolor[HTML]{FF6B6B}0.14 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class model and the end-to-end cascade, trained on GEO, tested out-of-distribution on LEO, OE + Energy features, at 10/30/100 minutes. Mean over 3 seeds; per-seed spread in eval\_long.csv. Bold = best per approach/time/metric. Cell colour: red\,=\,low, green\,=\,high.}
+\label{tab:seq_geo_to_leo_phys_jc}
+\end{table}
