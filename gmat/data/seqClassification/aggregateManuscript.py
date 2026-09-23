@@ -6,7 +6,8 @@ Run from gmat/data/seqClassification, after runManuscriptSweep.sh's parse step:
     python displaySeqLogData.py . --group-dir leo/ --group-name manuscript   # (per train orbit)
     python aggregateManuscript.py --out-dir manuscript_tables
 
-Consumes displaySeqLogData.py's group CSVs. Only logs whose stem ends in Seed<n> are kept, which
+Consumes displaySeqLogData.py's group CSVs (eval_, comparison_, and -- for the t7 model-size /
+inference-time / Big-O table -- complexity_manuscript.csv). Only logs whose stem ends in Seed<n> are kept, which
 is what excludes the pre-existing non-sweep logs (ResidLadder*, plain Energy_J2Energy_OE, ...)
 that --group-dir also rglob'd out of the same directories.
 """
@@ -18,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from displaySeqLogData import _suffix   # strips "^\d+min\d+_?"; see its comment for why
+from displaySeqLogData import COMPLEXITY_SYMBOLS
 
 # Reuse the existing tables' colour ramp and cell formatter rather than re-deriving them, so the
 # sequence-classification tables render identically to the ones already in gmat/data/tables/ and a
@@ -274,6 +276,52 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     )
 
 
+COMPLEXITY_APPROACHES = ["Joint", "Cascade"]
+
+
+def complexity_table(cx: pd.DataFrame, train: str, feat: str) -> pd.DataFrame:
+    """Model x {Joint, Cascade}: parameters, memory, and the asymptotic inference cost.
+
+    In-distribution only -- a transfer arm runs the same trained models, so its size and cost are
+    not new information. Params/memory are fixed by the architecture and input width, so they are
+    shown as a plain mean over seeds and windows. Measured inference time is left out of the table
+    (the logged timers are not scoped identically for joint and cascade); it stays in
+    complexity_manuscript.csv.
+
+    Cascade params/memory are Stage 1 + Stage 2 (displaySeqLogData.build_complexity)."""
+    d = cx[(cx.train == train) & (cx.test == train) & (cx.feat == feat)].copy()
+    if d.empty:
+        return pd.DataFrame()
+    d["Approach"] = pd.Categorical(d["Approach"], categories=COMPLEXITY_APPROACHES, ordered=True)
+    keys = ["Model", "Approach"]
+    g = d.groupby(keys, observed=True)
+
+    def _int(v: float) -> str:
+        return "--" if pd.isna(v) else f"{int(round(v)):,}".replace(",", "{,}")
+
+    out = pd.DataFrame({
+        "Params": g["Params"].mean().map(_int),
+        "Memory (MB)": g["Memory_MB"].mean().map(lambda v: "--" if pd.isna(v) else f"{v:.3f}"),
+    })
+    # Joint and cascade share one Big-O (the cascade is ~2x the same cost), so it is an index level
+    # beside Model rather than a column: to_latex sparsifies repeated index labels, which prints it
+    # once per model group.
+    out["Complexity"] = g["Big_O_LaTeX"].first()
+    return out.set_index("Complexity", append=True).reorder_levels(["Model", "Complexity", "Approach"])
+
+
+def complexity_legend(big_o_latex) -> str:
+    """Caption legend restricted to the symbols the given Big-O expressions actually use, in
+    COMPLEXITY_SYMBOLS order -- so e.g. p (PCA components) is only defined when PCA+MLP is in the
+    table. LaTeX commands (\\mathcal{O}, \\,) are stripped first so their letters are not mistaken
+    for symbols."""
+    used = set()
+    for s in big_o_latex:
+        used.update(re.findall(r"[A-Za-z]+", re.sub(r"\\[A-Za-z]+(\{[^}]*\})?|\\,", " ", str(s))))
+    entries = [e.strip() for e in COMPLEXITY_SYMBOLS.split(",")]
+    return ", ".join(e.replace("=", r"\,=\,", 1) for e in entries if e.split("=", 1)[0] in used)
+
+
 def arm_slug(train: str, test: str) -> str:
     """Filename/label stem. In-distribution keeps the original single-orbit name so existing
     references to tab:seq_leo_phys_jc do not break."""
@@ -495,6 +543,27 @@ def main() -> None:
          f"Per-class recall and F1 for the two hardest classes, in-distribution ({hp} min).",
          "tab:perclass")
 
+    # T7 -- model size, inference time and asymptotic cost, joint vs. cascade. One table per train
+    # orbit at the headline feature set. Optional input: group CSVs parsed before displaySeqLogData
+    # emitted complexity_<group>.csv simply do not have it.
+    cx_pattern = "parsed_data/*/_group/csv/complexity_manuscript.csv"
+    if any(Path(".").glob(cx_pattern)):
+        cx = load(cx_pattern)
+        for train in sorted(cx.train.unique()):
+            ct = complexity_table(cx, train, "phys")
+            symbols = (complexity_legend(ct.index.get_level_values("Complexity"))
+                       if not ct.empty else "")
+            emit(ct,
+                 a.out_dir / f"t7_complexity_{train}.tex",
+                 f"Model size and asymptotic inference cost, {train.upper()} "
+                 f"({feat_label('phys')} features). Cascade parameters and memory are Stage 1 + "
+                 f"Stage 2; both stages run on every frame. "
+                 f"Gradient-boosted trees report no parameter count (--). "
+                 f"{symbols}.",
+                 f"tab:complexity_{train}")
+    else:
+        print(f"  (skip t7_complexity: no {cx_pattern} -- re-run displaySeqLogData.py --group-dir)")
+
     # Per-orbit Joint-vs-Cascade R/P/F1 across every window -- one table per orbit group, per
     # feature arm (the arm has to be fixed within a table: approach x time x metric already fills
     # all 18 columns of the reference layout).
@@ -642,6 +711,31 @@ def _selfcheck() -> None:
     assert "OE + Acceleration Residual features" in tex_l, tex_l[-400:]
     assert "tab:seq_leo_ladder_jc" in tex_l
     assert "OE + Energy features" in rpf1_table(pd.DataFrame(rows), "leo", "leo", "phys", seeds=3)
+    # complexity_table: Joint before Cascade, one time column per window, NaN params -> "--",
+    # and the transfer arm (test != train) is excluded.
+    cx_rows = [{"train": "leo", "test": te, "feat": "phys", "Model": m, "Approach": ap,
+                "propMin": pm, "seed": sd,
+                "Params": float("nan") if m == "LightGBM" else 1000.0 * (2 if ap == "Cascade" else 1),
+                "Memory_MB": 0.5, "Inference_us_per_frame": 10.0 + sd,
+                "Big_O_LaTeX": r"$\mathcal{O}(T)$"}
+               for te in ("leo", "geo") for m in ("LightGBM", "CNN") for ap in ("Cascade", "Joint")
+               for pm in (10, 30) for sd in (0, 1, 2)]
+    ct = complexity_table(pd.DataFrame(cx_rows), "leo", "phys")
+    big_o = r"$\mathcal{O}(T)$"
+    assert list(ct.index) == [("CNN", big_o, "Joint"), ("CNN", big_o, "Cascade"),
+                              ("LightGBM", big_o, "Joint"), ("LightGBM", big_o, "Cascade")], list(ct.index)
+    assert list(ct.columns) == ["Params", "Memory (MB)"], list(ct.columns)
+    assert ct.loc[("CNN", big_o, "Cascade"), "Params"] == "2{,}000"
+    assert ct.loc[("LightGBM", big_o, "Joint"), "Params"] == "--"
+    # One Big-O per model group in the rendered table, not one per row.
+    assert ct.to_latex(escape=False).count(big_o) == 2
+    # Legend lists only the symbols in use, in legend order; p appears only with PCA+MLP.
+    lstm, pca = r"$\mathcal{O}(L\,T\,h\,(h+d))$", r"$\mathcal{O}(T\,(W d\,p + p\,h + h\,C))$"
+    assert complexity_legend([lstm]) == (r"T\,=\,timesteps, d\,=\,input features, "
+                                         r"h\,=\,hidden width, L\,=\,layers"), complexity_legend([lstm])
+    assert "PCA" not in complexity_legend([lstm]) and "PCA" in complexity_legend([lstm, pca])
+    assert "O\\,=" not in complexity_legend([lstm, pca])
+    assert complexity_table(pd.DataFrame(cx_rows), "geo", "phys").empty
     print("selfcheck ok")
 
 

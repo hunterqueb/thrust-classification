@@ -1,0 +1,24 @@
+\begin{table}
+\centering
+\caption{Model size and asymptotic inference cost, GEO (OE + Energy features). Cascade parameters and memory are Stage 1 + Stage 2; both stages run on every frame. Gradient-boosted trees report no parameter count (--). T\,=\,timesteps, d\,=\,input features, h\,=\,hidden width, L\,=\,layers, N\,=\,SSM state, B\,=\,Inception modules, k\,=\,sum of kernel widths, c\,=\,conv channels, W\,=\,Hankel window, E\,=\,trees, D\,=\,tree depth, C\,=\,classes, K\,=\,MiniRocket kernels, w\,=\,kernel width.}
+\label{tab:complexity_geo}
+\begin{tabular}{lllll}
+\toprule
+            &                                   &         &     Params & Memory (MB) \\
+Model & Complexity & Approach &            &             \\
+\midrule
+LightGBM & $\mathcal{O}(T\,(W d + E\,C\,D))$ & Joint &         -- &       0.405 \\
+            &                                   & Cascade &         -- &       0.511 \\
+MiniRocket & $\mathcal{O}(T\,K\,(w + C))$ & Joint &    9{,}748 &       0.086 \\
+            &                                   & Cascade &   12{,}185 &       0.116 \\
+CNN & $\mathcal{O}(B\,T\,k\,c^2)$ & Joint &  473{,}092 &       3.609 \\
+            &                                   & Cascade &  945{,}797 &       7.216 \\
+LSTM & $\mathcal{O}(L\,T\,h\,(h+d))$ & Joint &   50{,}500 &       0.385 \\
+            &                                   & Cascade &  100{,}853 &       0.769 \\
+MAMBA & $\mathcal{O}(L\,T\,h\,N)$ & Joint &   17{,}044 &       0.130 \\
+            &                                   & Cascade &   33{,}701 &       0.257 \\
+TRANSFORMER & $\mathcal{O}(L\,(T^2 h + T h^2))$ & Joint &  288{,}196 &       2.199 \\
+            &                                   & Cascade &  576{,}197 &       4.396 \\
+\bottomrule
+\end{tabular}
+\end{table}

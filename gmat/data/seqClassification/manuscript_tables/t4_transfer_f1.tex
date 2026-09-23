@@ -1,29 +1,24 @@
 \begin{table}
+\centering
 \caption{Cross-regime transfer, macro f1 (30 min, OE + Energy). The mixed combined/leo-meo-geo dataset is excluded: it is 93\% LEO and 1390 of its 1500 ICs are identical to the standalone LEO set.}
 \label{tab:transfer_f1}
 \begin{tabular}{llllll}
 \toprule
- & arm & geo$\rightarrow$geo & geo$\rightarrow$leo & leo$\rightarrow$geo & leo$\rightarrow$leo \\
-model & eval_stage &  &  &  &  \\
+            & arm & geo$\rightarrow$geo & geo$\rightarrow$leo & leo$\rightarrow$geo & leo$\rightarrow$leo \\
+model & eval_stage &                     &                     &                     &                     \\
 \midrule
-\multirow[t]{2}{*}{LightGBM} & cascade_end_to_end & 0.313 $\pm$ 0.001 & 0.232 $\pm$ 0.007 & 0.214 $\pm$ 0.000 & 0.306 $\pm$ 0.009 \\
- & joint_4class & 0.484 $\pm$ 0.009 & 0.229 $\pm$ 0.007 & 0.211 $\pm$ 0.001 & 0.405 $\pm$ 0.009 \\
-\cline{1-6}
-\multirow[t]{2}{*}{MiniRocket} & cascade_end_to_end & 0.995 $\pm$ 0.005 & 0.363 $\pm$ 0.069 & 0.267 $\pm$ 0.045 & 0.755 $\pm$ 0.020 \\
- & joint_4class & 0.995 $\pm$ 0.005 & 0.378 $\pm$ 0.025 & 0.306 $\pm$ 0.047 & 0.712 $\pm$ 0.055 \\
-\cline{1-6}
-\multirow[t]{2}{*}{CNN} & cascade_end_to_end & 0.996 $\pm$ 0.002 & 0.213 $\pm$ 0.000 & 0.224 $\pm$ 0.016 & 0.942 $\pm$ 0.011 \\
- & joint_4class & 0.994 $\pm$ 0.002 & 0.213 $\pm$ 0.000 & 0.201 $\pm$ 0.022 & 0.916 $\pm$ 0.045 \\
-\cline{1-6}
-\multirow[t]{2}{*}{LSTM} & cascade_end_to_end & 0.988 $\pm$ 0.003 & 0.213 $\pm$ 0.000 & 0.212 $\pm$ 0.004 & 0.838 $\pm$ 0.006 \\
- & joint_4class & 0.988 $\pm$ 0.001 & 0.093 $\pm$ 0.101 & 0.201 $\pm$ 0.012 & 0.813 $\pm$ 0.014 \\
-\cline{1-6}
-\multirow[t]{2}{*}{MAMBA} & cascade_end_to_end & 0.916 $\pm$ 0.016 & 0.184 $\pm$ 0.031 & 0.148 $\pm$ 0.060 & 0.597 $\pm$ 0.022 \\
- & joint_4class & 0.914 $\pm$ 0.048 & 0.150 $\pm$ 0.093 & 0.078 $\pm$ 0.017 & 0.542 $\pm$ 0.037 \\
-\cline{1-6}
-\multirow[t]{2}{*}{TRANSFORMER} & cascade_end_to_end & 0.995 $\pm$ 0.002 & 0.143 $\pm$ 0.120 & 0.170 $\pm$ 0.076 & 0.567 $\pm$ 0.306 \\
- & joint_4class & 0.929 $\pm$ 0.062 & 0.100 $\pm$ 0.106 & 0.214 $\pm$ 0.000 & 0.805 $\pm$ 0.010 \\
-\cline{1-6}
+LightGBM & cascade_end_to_end &   0.313 $\pm$ 0.001 &   0.232 $\pm$ 0.007 &   0.214 $\pm$ 0.000 &   0.306 $\pm$ 0.009 \\
+            & joint_4class &   0.484 $\pm$ 0.009 &   0.229 $\pm$ 0.007 &   0.211 $\pm$ 0.001 &   0.405 $\pm$ 0.009 \\
+MiniRocket & cascade_end_to_end &   0.995 $\pm$ 0.005 &   0.363 $\pm$ 0.069 &   0.267 $\pm$ 0.045 &   0.755 $\pm$ 0.020 \\
+            & joint_4class &   0.995 $\pm$ 0.005 &   0.378 $\pm$ 0.025 &   0.306 $\pm$ 0.047 &   0.712 $\pm$ 0.055 \\
+CNN & cascade_end_to_end &   0.996 $\pm$ 0.002 &   0.213 $\pm$ 0.000 &   0.224 $\pm$ 0.016 &   0.942 $\pm$ 0.011 \\
+            & joint_4class &   0.994 $\pm$ 0.002 &   0.213 $\pm$ 0.000 &   0.201 $\pm$ 0.022 &   0.916 $\pm$ 0.045 \\
+LSTM & cascade_end_to_end &   0.988 $\pm$ 0.003 &   0.213 $\pm$ 0.000 &   0.212 $\pm$ 0.004 &   0.838 $\pm$ 0.006 \\
+            & joint_4class &   0.988 $\pm$ 0.001 &   0.093 $\pm$ 0.101 &   0.201 $\pm$ 0.012 &   0.813 $\pm$ 0.014 \\
+MAMBA & cascade_end_to_end &   0.916 $\pm$ 0.016 &   0.184 $\pm$ 0.031 &   0.148 $\pm$ 0.060 &   0.597 $\pm$ 0.022 \\
+            & joint_4class &   0.914 $\pm$ 0.048 &   0.150 $\pm$ 0.093 &   0.078 $\pm$ 0.017 &   0.542 $\pm$ 0.037 \\
+TRANSFORMER & cascade_end_to_end &   0.995 $\pm$ 0.002 &   0.143 $\pm$ 0.120 &   0.170 $\pm$ 0.076 &   0.567 $\pm$ 0.306 \\
+            & joint_4class &   0.929 $\pm$ 0.062 &   0.100 $\pm$ 0.106 &   0.214 $\pm$ 0.000 &   0.805 $\pm$ 0.010 \\
 \bottomrule
 \end{tabular}
 \end{table}

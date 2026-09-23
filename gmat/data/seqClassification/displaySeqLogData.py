@@ -17,10 +17,13 @@ Emits, per log, mirroring gmat/data/classification/displayLogData.py's layout:
       eval.csv         one row per evaluated report (joint / cascade stage1 / cascade stage2 /
                         cascade end-to-end / stage1-solo / stage2-solo)
       comparison.csv   one row per backbone: joint vs. cascade head-to-head
+      complexity.csv   one row per backbone x {Joint, Cascade}: params, memory, inference time
+                        (total and per frame) and asymptotic inference cost (Big-O)
   parsed_data/<orbit>/<run-dir>/<suffix>/plots/
       epoch_f1.png, epoch_loss.png
       comparison.png        grouped bar chart: joint vs. cascade accuracy & macro-F1
       stage_comparison.png  stage 1 vs. stage 1 and stage 2 vs. stage 2, across backbones
+      complexity.png        joint vs. cascade params & inference time per frame, Big-O on the axis
       confmats/confmat_<backbone>_<eval_stage>.png
 
 NOTE: these filenames deliberately do NOT repeat the log stem -- <run-dir>/<suffix> already
@@ -624,6 +627,212 @@ def save_stage_cascade_comparison_plot(eval_df: pd.DataFrame, run_df: pd.DataFra
     plt.close(fig)
 
 
+# ───── Complexity (parameters / inference time / Big-O) ─────
+# Per-sequence inference cost as a function of the sequence length. Symbols:
+#   T = timesteps per trajectory   d = input features       h = hidden width     L = layers
+#   N = SSM state size (Mamba)     B = Inception modules    k = sum of kernel widths
+#   c = conv channels              W = Hankel window length E = trees / boosting rounds
+#   D = tree depth                 C = output classes       p = PCA components
+#   K = MiniRocket kernels         w = MiniRocket kernel width
+# Big-O is per trajectory; the time per frame is roughly constant in T for every model except
+# the Transformer. A cascade runs Stage 1 AND Stage 2 over every frame (see runCascadeEvaluation /
+# the classic-ML cascade path in the training script -- Stage 2 is not gated to detected frames),
+# so it has the same asymptotic class as the joint model with roughly twice the constant.
+COMPLEXITY_SYMBOLS = ("T=timesteps, d=input features, h=hidden width, L=layers, N=SSM state, "
+                      "B=Inception modules, k=sum of kernel widths, c=conv channels, W=Hankel window, "
+                      "E=trees, D=tree depth, C=classes, p=PCA components, K=MiniRocket kernels, "
+                      "w=kernel width")
+
+# normalized model name -> (Big-O unicode, Big-O LaTeX, note)
+BIG_O_BY_MODEL: Dict[str, Tuple[str, str, str]] = {
+    "LSTM": ("O(L·T·h·(h+d))", r"$\mathcal{O}(L\,T\,h\,(h+d))$",
+             "recurrent; T sequential steps, not parallel over time"),
+    "MAMBA": ("O(L·T·h·N)", r"$\mathcal{O}(L\,T\,h\,N)$", "selective scan; linear in T"),
+    "BIMAMBA": ("O(L·T·h·N)", r"$\mathcal{O}(L\,T\,h\,N)$",
+                "forward + backward selective scan (2x constant); linear in T"),
+    "TRANSFORMER": ("O(L·(T²·h + T·h²))", r"$\mathcal{O}(L\,(T^2 h + T h^2))$",
+                    "full self-attention; quadratic in T"),
+    "CNN": ("O(B·T·k·c²)", r"$\mathcal{O}(B\,T\,k\,c^2)$", "InceptionTime; linear in T"),
+    "LIGHTGBM": ("O(T·(W·d + E·C·D))", r"$\mathcal{O}(T\,(W d + E\,C\,D))$",
+                 "Hankel-window features + one tree per class per boosting round"),
+    "XGBOOST": ("O(T·(W·d + E·C·D))", r"$\mathcal{O}(T\,(W d + E\,C\,D))$",
+                "Hankel-window features + one tree per class per boosting round"),
+    "CATBOOST": ("O(T·(W·d + E·C·D))", r"$\mathcal{O}(T\,(W d + E\,C\,D))$",
+                 "Hankel-window features + one oblivious tree per class per round"),
+    "RANDOMFOREST": ("O(T·(W·d + E·D))", r"$\mathcal{O}(T\,(W d + E\,D))$",
+                     "Hankel-window features + E multi-class trees"),
+    "EXTRATREES": ("O(T·(W·d + E·D))", r"$\mathcal{O}(T\,(W d + E\,D))$",
+                   "Hankel-window features + E multi-class trees"),
+    "PCA+MLP": ("O(T·(W·d·p + p·h + h·C))", r"$\mathcal{O}(T\,(W d\,p + p\,h + h\,C))$",
+                "Hankel window -> PCA projection -> MLP"),
+    "MINIROCKET": ("O(T·K·(w + C))", r"$\mathcal{O}(T\,K\,(w + C))$",
+                   "K width-w kernels per window + linear ridge head"),
+    "HYBRID": ("O(K·T + B·T·k·c²)", r"$\mathcal{O}(K\,T + B\,T\,k\,c^2)$",
+               "whole-trajectory MiniRocket detector + InceptionTime typer"),
+}
+
+# "MiniRocket Inference Time (all heads, one transform pass)" -- one shared timing covering every
+# MiniRocket head, printed BEFORE its 'Entering' markers, so it lands in the previous backbone's
+# block and RE_INFERENCE_TIME (which requires "Inference Time" directly before "Elapsed") skips it.
+RE_SHARED_INFERENCE = re.compile(
+    r"^(\S.*?) Inference Time \(([^)]*)\)\s+Elapsed time is\s*([\d.]+)\s*seconds", re.M
+)
+
+
+def _model_key(name: str) -> str:
+    return re.sub(r"[^A-Z0-9+]", "", str(name).upper())
+
+
+def parse_shared_inference_times(text: str) -> Dict[str, float]:
+    """Model key -> shared inference time (s) for backbones that time all heads in one pass."""
+    return {_model_key(m.group(1)): float(m.group(3)) for m in RE_SHARED_INFERENCE.finditer(text)}
+
+
+def build_complexity(run_df: pd.DataFrame, eval_df: pd.DataFrame,
+                     shared_inference: Dict[str, float] | None = None) -> pd.DataFrame:
+    """One row per (backbone, approach) with approach in {Joint, Cascade}: parameter count, memory,
+    wall-clock inference time over the eval split, time per frame, and the asymptotic inference cost.
+
+    Parameters/memory for a cascade are Stage 1 + Stage 2 (both are kept and run at inference).
+    Classic-ML/GBDT models print 'Total parameters: NaN', so Params stays NaN for them and
+    Memory_MB is the size comparison to use instead.
+
+    Inference times are the logged wall-clock timers, taken as-is. The two timers are NOT scoped
+    identically in the training script: the joint timer covers predict + classification report,
+    while the cascade timer also covers combineCascadePredictions' event-level report and its
+    seqpred plot savefig -- so the logged cascade/joint ratio overstates the ~2x the Big-O implies.
+    For backbones with a shared-transform timer (MiniRocket), the joint row falls back to the
+    shared pass when it has no timer of its own, and the shared pass is added to the cascade time,
+    whose own timer covers only combining the already-predicted heads."""
+    if run_df.empty and eval_df.empty:
+        return pd.DataFrame()
+    shared_inference = shared_inference or {}
+
+    models = list(dict.fromkeys(m for df in (run_df, eval_df) if not df.empty for m in df["model"]))
+
+    def _runs(model: str, component: str) -> pd.DataFrame:
+        if run_df.empty:
+            return run_df
+        return run_df[(run_df["model"] == model) & (run_df["component"] == component)
+                      & (run_df["approach"] == ("joint" if component == "Joint" else "cascade"))]
+
+    def _eval(model: str, stage: str):
+        if eval_df.empty:
+            return None
+        r = eval_df[(eval_df["model"] == model) & (eval_df["eval_stage"] == stage)]
+        return r.iloc[0] if not r.empty else None
+
+    def _first(df: pd.DataFrame, col: str) -> float:
+        return float(df[col].iloc[0]) if not df.empty and col in df.columns else float("nan")
+
+    rows: List[Dict[str, Any]] = []
+    for model in models:
+        key = _model_key(model)
+        big_o, big_o_tex, note = BIG_O_BY_MODEL.get(key, ("n/a", "n/a", "no complexity entry for this backbone"))
+        shared = shared_inference.get(key)
+
+        joint_run = _runs(model, "Joint")
+        joint_ev = _eval(model, "joint_4class")
+        if not joint_run.empty or joint_ev is not None:
+            t = float(joint_ev["inference_time_s"]) if joint_ev is not None else float("nan")
+            timing_note = ""
+            if np.isnan(t) and shared is not None:
+                t, timing_note = shared, "shared transform pass (all heads)"
+            rows.append({
+                "Model": model, "Approach": "Joint",
+                "Params": _first(joint_run, "params"),
+                "Params_Stage1": float("nan"), "Params_Stage2": float("nan"),
+                "Memory_MB": _first(joint_run, "memory_mb"),
+                "Inference_Time_s": t,
+                "Frames": int(joint_ev["n_total"]) if joint_ev is not None else np.nan,
+                "Big_O": big_o, "Big_O_LaTeX": big_o_tex, "Cost_vs_Joint": "1x",
+                "Complexity_Note": note, "Timing_Note": timing_note,
+            })
+
+        s1_run, s2_run = _runs(model, "Stage1"), _runs(model, "Stage2")
+        casc_ev = _eval(model, "cascade_end_to_end")
+        if not s1_run.empty or not s2_run.empty or casc_ev is not None:
+            p1, p2 = _first(s1_run, "params"), _first(s2_run, "params")
+            m1, m2 = _first(s1_run, "memory_mb"), _first(s2_run, "memory_mb")
+            t = float(casc_ev["inference_time_s"]) if casc_ev is not None else float("nan")
+            timing_note = ""
+            if shared is not None and not np.isnan(t):
+                t, timing_note = t + shared, "shared transform pass + cascade combine"
+            cost = ("~1x transform + 2 linear heads" if key == "MINIROCKET"
+                    else "~2x (Stage 1 + Stage 2 on every frame)")
+            rows.append({
+                "Model": model, "Approach": "Cascade",
+                "Params": p1 + p2, "Params_Stage1": p1, "Params_Stage2": p2,
+                "Memory_MB": m1 + m2,
+                "Inference_Time_s": t,
+                "Frames": int(casc_ev["n_total"]) if casc_ev is not None else np.nan,
+                "Big_O": big_o, "Big_O_LaTeX": big_o_tex, "Cost_vs_Joint": cost,
+                "Complexity_Note": note, "Timing_Note": timing_note,
+            })
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    out["Inference_us_per_frame"] = out["Inference_Time_s"] / out["Frames"].astype(float) * 1e6
+    lead = ["Model", "Approach", "Params", "Params_Stage1", "Params_Stage2", "Memory_MB",
+            "Inference_Time_s", "Frames", "Inference_us_per_frame", "Big_O", "Cost_vs_Joint"]
+    return out[lead + [c for c in out.columns if c not in lead]]
+
+
+def save_complexity_plot(df: pd.DataFrame, png: Path) -> None:
+    """Joint vs. cascade parameter count and inference time per frame, one bar pair per backbone,
+    with each backbone's Big-O under its tick label."""
+    if df.empty:
+        return
+    models = list(dict.fromkeys(df["Model"]))
+    big_o = df.drop_duplicates("Model").set_index("Model")["Big_O"]
+    x = np.arange(len(models))
+    width = 0.38
+
+    fig, axes = plt.subplots(1, 2, figsize=(max(10, 2.6 * len(models)), 5.5))
+    panels = [("Params", "Parameters (log)", "Model Parameters"),
+              ("Inference_us_per_frame", "Inference time per frame (µs, log)", "Inference Time")]
+    for ax, (col, ylabel, title) in zip(axes, panels):
+        labels = []
+        for off, approach in ((-width / 2, "Joint"), (width / 2, "Cascade")):
+            sub = df[df["Approach"] == approach].set_index("Model").reindex(models)
+            vals = sub[col].astype(float)
+            bars = ax.bar(x + off, vals.fillna(0), width, label=approach)
+            labels += [(b.get_x() + b.get_width() / 2, v) for b, v in zip(bars, vals)]
+        if (df[col].astype(float) > 0).any():
+            ax.set_yscale("log")
+            lo, hi = ax.get_ylim()
+            ax.set_ylim(lo, hi * 4)   # headroom for the rotated value labels
+        bottom = ax.get_ylim()[0]
+        for xb, v in labels:
+            has = pd.notna(v) and v > 0
+            text = (f"{v:,.0f}" if col == "Params" else f"{v:.1f}") if has else "n/a"
+            ax.annotate(text, (xb, v if has else bottom), ha="center", va="bottom", fontsize=7, rotation=90)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{m}\n{big_o.get(m, '')}" for m in models], fontsize=8)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(alpha=0.3, axis="y")
+
+    fig.suptitle("Joint vs. Cascade: Model Size, Inference Time and Asymptotic Cost")
+    fig.text(0.5, 0.005, COMPLEXITY_SYMBOLS, ha="center", va="bottom", fontsize=7, wrap=True)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig(png)
+    plt.close(fig)
+
+
+def print_complexity(df: pd.DataFrame, title: str) -> None:
+    if df.empty:
+        return
+    cols = [c for c in ["Model", "Approach", "Params", "Memory_MB", "Inference_Time_s",
+                        "Inference_us_per_frame", "Big_O", "Cost_vs_Joint"]
+            if c in df.columns]
+    print(f"\n{title}:")
+    print(df[cols].to_string(index=False, float_format=lambda v: f"{v:,.4g}"))
+    print(f"  ({COMPLEXITY_SYMBOLS})")
+
+
 # ───── I/O ─────
 # Log stems are built by the training script as f"{propMin}min{systems}{strAdd}" (see logStem in
 # mambaTimeSeriesSeqClassificationGMATThrusts.py), where strAdd is the underscore-joined list of
@@ -671,13 +880,15 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
     epochs_csv = csv_dir / "epochs.csv"
     eval_csv = csv_dir / "eval.csv"
     comparison_csv = csv_dir / "comparison.csv"
+    complexity_csv = csv_dir / "complexity.csv"
     f1_png = plot_dir / "epoch_f1.png"
     loss_png = plot_dir / "epoch_loss.png"
     comparison_png = plot_dir / "comparison.png"
     stage_comparison_png = plot_dir / "stage_comparison.png"
+    complexity_png = plot_dir / "complexity.png"
 
     if emit_outputs and not force and all(
-        p.exists() for p in (runs_csv, epochs_csv, eval_csv, comparison_csv, f1_png, loss_png)
+        p.exists() for p in (runs_csv, epochs_csv, eval_csv, comparison_csv, complexity_csv, f1_png, loss_png)
     ):
         print(f"skip {path}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -789,6 +1000,8 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
     ep_all.to_csv(epochs_csv, index=False)
     eval_df.to_csv(eval_csv, index=False)
     comparison_df.to_csv(comparison_csv, index=False)
+    complexity_df = build_complexity(run_df, eval_df, parse_shared_inference_times(text))
+    complexity_df.to_csv(complexity_csv, index=False)
 
     if not ep_all.empty:
         save_epoch_f1_plot(ep_all, f1_png)
@@ -796,6 +1009,7 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
     if not comparison_df.empty:
         save_comparison_plot(comparison_df, comparison_png)
     save_stage_cascade_comparison_plot(eval_df, run_df, stage_comparison_png)
+    save_complexity_plot(complexity_df, complexity_png)
 
     print(f"processed -> {runs_csv}")
     if not comparison_df.empty:
@@ -805,6 +1019,7 @@ def process_log(path: Path, root: Path, force: bool = False, emit_outputs: bool 
                              "Cascade_EndToEnd_Min_Thrust_Recall", "Better_By_Macro_F1"]
                 if c in comparison_df.columns]
         print(comparison_df[cols].to_string(index=False))
+    print_complexity(complexity_df, f"Joint vs. Cascade complexity ({stem})")
 
     return run_df, eval_df, comparison_df
 
@@ -828,11 +1043,22 @@ def process_group_dir(group_dir: Path, root: Path, force: bool, group_name: str 
     suffix = f"_{group_name}" if group_name else ""
     eval_out = csv_dir / f"eval{suffix}.csv"
     comparison_out = csv_dir / f"comparison{suffix}.csv"
+    # Per-log rows only; the mean +/- std over seeds and the LaTeX table are aggregateManuscript.py's
+    # job (it reads this file alongside eval/comparison), so seed filtering and config parsing live
+    # in one place.
+    complexity_out = csv_dir / f"complexity{suffix}.csv"
 
     all_eval: List[pd.DataFrame] = []
     all_comparison: List[pd.DataFrame] = []
+    all_complexity: List[pd.DataFrame] = []
     for lg in logs:
-        _run_df, eval_df, comparison_df = process_log(lg, root, force=force, emit_outputs=emit_per_log)
+        run_df, eval_df, comparison_df = process_log(lg, root, force=force, emit_outputs=emit_per_log)
+        complexity_df = build_complexity(run_df, eval_df,
+                                         parse_shared_inference_times(lg.read_text(errors="ignore")))
+        if not complexity_df.empty:
+            complexity_df.insert(0, "log_relpath", str(lg.relative_to(root)))
+            complexity_df.insert(0, "log_stem", lg.stem)
+            all_complexity.append(complexity_df)
         if not eval_df.empty:
             all_eval.append(eval_df)
         if not comparison_df.empty:
@@ -847,6 +1073,10 @@ def process_group_dir(group_dir: Path, root: Path, force: bool, group_name: str 
     comparison_all.to_csv(comparison_out, index=False)
     print(f"[group] wrote combined eval -> {eval_out}")
     print(f"[group] wrote combined comparison -> {comparison_out}")
+
+    complexity_all = pd.concat(all_complexity, ignore_index=True) if all_complexity else pd.DataFrame()
+    complexity_all.to_csv(complexity_out, index=False)
+    print(f"[group] wrote combined complexity -> {complexity_out}")
     return comparison_out
 
 
