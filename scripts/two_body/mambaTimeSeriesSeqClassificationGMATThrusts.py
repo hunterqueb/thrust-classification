@@ -1,100 +1,36 @@
-# parse at the beginning before long imports
-# script usage
+# In-sequence (per-timestep) thrust classification: at every timestep, is thrust occurring and if
+# so is it Chemical/Electric/Impulsive. Ground truth is each class file's per-timestep
+# 'thrustingTime' (Impulsive is forward-filled from the burn to the end of the window). Data
+# loading lives in seqData.py, shared with the whole-trajectory script's --seq-data.
 #
-# In-sequence (per-timestep) thrust classification. At every timestep of a trajectory, classify
-# whether thrust is occurring and, if so, which of Chemical/Electric/Impulsive it is. Loads all
-# 4 classes (Chemical/Electric/ImpBurn/NoThrust) from {data.yaml classification path}/{orbit}/
-# {propMin}min-{systems}/statesArray{Class}.npz, using each file's per-timestep 'thrustingTime'
-# array as ground truth (Impulsive is forward-filled from the burn instant to the end of the
-# propagation window, since the orbit stays altered afterward; a class file missing
-# 'thrustingTime' -- as ImpBurn/NoThrust currently are, pending an upstream GMAT-Thrust-Data fix
-# -- degrades to all-background labels with a printed warning instead of crashing).
+# Two approaches, compared in one run (--mode all|joint|cascade|stage1|stage2):
+#   joint    one 4-class per-timestep model (0=NoThrust,1=Chemical,2=Electric,3=Impulsive)
+#   cascade  binary thrust detector (stage 1) -> 3-class type classifier on thrusting frames
+#            (stage 2), recombined into the joint label space so the reports compare directly.
 #
-# Two approaches are trained and compared side by side in one run:
-#   joint    a single 4-class per-timestep model (0=NoThrust,1=Chemical,2=Electric,3=Impulsive)
-#   cascade  a binary "is thrust occurring" detector (stage 1) feeding a 3-class Chemical/
-#            Electric/Impulsive type classifier (stage 2, trained only on thrusting timesteps),
-#            combined at inference into the same 4-class label space as the joint model so the
-#            two approaches' classification reports are directly comparable.
-# --mode {all,joint,cascade,stage1,stage2} selects which of these run (default: all).
+# Backbones: LSTM and Mamba by default (--no-lstm/--no-mamba); --transformer/--cnn opt in.
+# --hybrid = whole-trajectory MiniRocket stage 1 + CNN stage 2 (cascade modes only).
+# LightGBM (on by default), --xgboost/--catboost/--rf/--extratrees and --mlp (PCA+MLP) train on
+# Hankel-windowed per-timestep rows; --minirocket on short trailing windows with ridge heads.
 #
-# LSTM and Mamba backbones always run (--no-lstm/--no-mamba disable them); --transformer/--cnn
-# opt in to per-timestep Transformer / 1D-CNN (InceptionTime) backbones as additional comparisons
-# in the same run. --hybrid opts in to a mixed cascade -- a whole-trajectory MiniRocket stage-1
-# detector ("does this ~30-minute window contain thrust anywhere", broadcast across every
-# timestep of a trajectory) paired with a CNN (InceptionTime) stage-2 per-timestep type
-# classifier -- and only participates in cascade/stage-solo modes (no single joint 4-class
-# 'hybrid' model exists).
-#
-# Classic ML / GBDT baselines (LightGBM on by default via --no-classic to disable; --xgboost/
-# --catboost/--rf/--extratrees to opt in) and --mlp (PCA+MLP) operate on Hankel-windowed rows
-# (a trailing per-timestep context window, via buildHankelWindowRowsPerTimestep) rather than
-# full [B,T,C] sequences -- tree/linear models have no global-pooling requirement, unlike
-# MiniRocket, so per-timestep windowed rows are a natural fit for them. --minirocket runs
-# MiniRocket the same way: end-to-end per-timestep sequence classification (joint AND cascade)
-# over short trailing windows, one shared kernel transform feeding three ridge heads. See
-# runMiniRocketPerTimestep for why it is windowed rather than whole-trajectory.
-#
-# Class imbalance: --loss-scheme/--cb-beta/--focal-gamma reweight the loss (see
-# _infer_class_weights); --oversample instead reweights *sampling* -- the neural train_loader
-# (LSTM/Mamba/Transformer/CNN) draws whole training trajectories with replacement, biased toward
-# trajectories containing rarer per-timestep classes (see _computeOversamplingWeights). Whole
-# trajectories, not individual timesteps, are the unit of resampling, since shuffling timesteps
-# within a sequence would break the temporal context these backbones need. The two knobs are
-# independent and can be combined; classic-ML/PCA+MLP/MiniRocket/hybrid-stage-1 train on raw
-# arrays outside train_loader and are unaffected by --oversample.
-#
-# --j2-energy switches the --energy/--energyRate channels to the J2-INCLUSIVE specific energy
-# (qutils.orbital.orbitalEnergyJ2). The Keplerian v^2/2 - mu/r is not conserved under J2 -- energy
-# shuttles between it and the J2 potential term every orbit -- so its rate measures that exchange,
-# not the perturbing forces you care about. On leo that exchange is ~55x an electric thruster's
-# signature and ~1000x atmospheric drag, and removing it takes per-frame Electric-vs-NoThrust ROC
-# AUC from 0.52 (chance) to 0.83. Off by default only to keep previously logged --energy results
-# reproducible; recommended on for any low-thrust work. See analyzeThrustSeparability.py.
-#
-# --sinusoids K replaces every feature channel with K dominant sinusoidal components extracted per
-# trajectory via FFT (see _decomposeSinusoids): the channel's K largest-magnitude non-DC frequency
-# bins, each reconstructed as its own real sinusoid signal, ordered by descending magnitude. C
-# channels become C*K -- e.g. raw ECI states (6 channels) with --sinusoids 3 yields 18. Off (0) by
-# default; applied after --OE/--energy/--energyRate (whatever channels those leave behind are what
-# gets decomposed) and before --standardize.
-#
-# --physics-loss-weight W (see _computePhysicsResidualTensors, physicsConsistencyLoss) adds an
-# auxiliary loss term (--mode joint/stage2) that nudges the model's EXISTING Chemical-vs-Electric
-# logit margin toward a physics-derived pseudo-target -- no new head/params. Chemical thrust
-# accelerations are typically on the order of LEO's J2 perturbation and Electric on the order of
-# the much smaller combined J3-J6 perturbation, so which analytic scale the measured residual sits
-# closer to is itself evidence of the type. That coincidence is LEO-specific (J2/J3-J6 fall off
-# steeply with altitude while thruster accel does not, so at GEO both thrust types vastly exceed
-# all zonal harmonics) -- to stay orbit-regime-agnostic, J2/J3-J6 accelerations are normalized by
-# local two-body gravity (mu/r^2) into dimensionless ratios that gate the term's per-timestep
-# weight, large in LEO and naturally collapsing toward 0 in GEO, with no regime-specific branching
-# in the code. Off (0.0) by default.
-#
-# --smooth-max-gap N (see smoothPerTimestepGrid, _reportEventLevelWithSmoothing) is a separate,
-# purely post-hoc knob -- no retraining, no loss changes. It closes short interior NoThrust gaps
-# between two thrusting predictions (bounded on both sides) before event-level reporting/plotting,
-# targeting patchy detection within one real burst. It only ever CLOSES gaps and never erases short
-# positive runs, so it cannot destroy a correctly-detected short burst the way a majority-vote
-# window or minimum-run-length filter could. Applied uniformly to every model family's [N,T]
-# prediction grid via one shared function; the raw report always runs first and is never replaced,
-# only supplemented, so the payoff is directly comparable. Off (0) by default.
-#
-# Measured effect (leo/30min-1500, one full training run per backbone): LSTM produced ZERO interior
-# gaps at any config tried and CNN only 8 (all length 1), so the flag does nothing for either --
-# their local/recurrent context already yields contiguous predictions. Transformer produced 373
-# gaps (max length 3) and gained ~0.9pp Impulsive event recall at --smooth-max-gap 3, with Chemical
-# and Electric bit-identical. Use scripts/two_body/sweepSmoothGap.py to check any other config: it
-# trains once and sweeps gap values on that one fixed prediction grid, and reports the interior-gap
-# histogram so a flat sweep is distinguishable from a bug.
+# Notable options:
+#   --loss-scheme/--cb-beta/--focal-gamma  class-weighted loss; --oversample resamples whole
+#                                          trajectories (neural backbones only)
+#   --j2-energy          J2-inclusive energy. The Keplerian form swings with J2 every orbit (~55x
+#                        an electric thruster on leo); removing it takes per-frame Electric-vs-
+#                        NoThrust AUC from 0.52 to 0.83. Recommended for low-thrust work.
+#   --sinusoids K        replace each channel with its K dominant FFT components (C -> C*K)
+#   --physics-loss-weight W  auxiliary Chemical-vs-Electric term from the J2 / J3-J6 residual
+#                        scales, gated by their ratio to two-body gravity (fades out toward GEO)
+#   --smooth-max-gap N   post-hoc: close interior NoThrust gaps <= N between thrust predictions
+#                        before event-level reporting. Measured on leo/30min: no effect on LSTM/CNN,
+#                        ~0.9pp Impulsive event recall on Transformer at N=3 (sweepSmoothGap.py).
 #
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
 import argparse
 
-# MiniRocket per-timestep constants. Defined here (not beside the runner) because --minirocket-kernels
-# advertises the default in its help text and the strAdd stem block compares against it, both of which
-# execute at import time, long before the function definitions below.
+# MiniRocket per-timestep constants -- up here because argparse help and strAdd read them.
 MINIROCKET_DEFAULT_KERNELS = 2500   # sktime rounds down to a multiple of 84 -> 2436
 MINIROCKET_WINDOW = 9               # MiniRocket's kernels are length 9; shorter windows are rejected
 MINIROCKET_CHUNK = 8192             # rows per transform/solve chunk -- caps peak memory, see _ridgeFit
@@ -261,7 +197,7 @@ parser.add_argument("--eval-test", dest="eval_test", action="store_true",
                           "orbit. By default an in-distribution run reports on the VALIDATION split, which "
                           "is also what early stopping and best-checkpoint restore select on -- so those "
                           "numbers are optimistically biased, and are not comparable against a cross-orbit "
-                          "run, which does report on a genuinely held-out split. The IC-disjoint 15% test "
+                          "run, which does report on a genuinely held-out split. The IC-disjoint 15%% test "
                           "split already exists in that branch and is simply unused. Turn this on for any "
                           "table that puts in-distribution and cross-regime results side by side. Tagged "
                           "as EvalTest_ so it cannot collide with existing logs.")
@@ -356,56 +292,13 @@ from qutils.ml.classifer import apply_noise
 from qutils.ml.mamba import Mamba, MambaConfig
 
 if runSeed is not None:
-    # Seeding the split alone (via _icGroupSplit's default_rng) would leave weight init, dropout and
-    # the WeightedRandomSampler draw unseeded -- enough for a valid variance estimate across seeds,
-    # but not enough to regenerate a specific table row. This is the first legal spot: torch/numpy
-    # are imported after argument parsing.
+    # the split is seeded separately; this covers weight init, dropout and the sampler
     torch.manual_seed(runSeed)
     np.random.seed(runSeed)
 
 device = getDevice()
 
-# --residual-ladder channel layout, in the order _computeResidualLadder computes them. Used for the
-# feature-count printout and for anyone reading a saved feature array back.
-RESIDUAL_LADDER_ALL_CHANNEL_NAMES = (
-    "log10(|dE_kep/dt| / (|v| g0))",      # rung 0: residual after removing two-body only
-    "log10(|dE_J2/dt| / (|v| g0))",       # rung 1: ... after two-body + J2
-    "log10(|dE_J2toJ6/dt| / (|v| g0))",   # rung 2: ... after two-body + J2..J6
-    "log10(a_J2 / g0)",                   # reference rung height: J2
-    "log10(a_J3toJ6 / g0)",               # reference rung height: J3-J6
-)
-
-# LEAN (default) keeps only the DEEPEST residual rung plus the two reference rung heights.
-#
-# Measured on leo/30min-1500, per-frame Electric-vs-NoThrust test AUC over an IC-split
-# (1000 train / 500 test ICs), logistic regression / HistGradientBoosting:
-#
-#   rung 2 alone      0.8175 / 0.8127     three rungs (0,1,2)  0.8168 / 0.8193
-#   rung 2 + refs     0.8187 / 0.8274     all five             0.8182 / 0.8301
-#
-# Stacking three residual rungs instead of one buys ~0.007 AUC, and rungs 1 and 2 are 0.944
-# correlated -- they are near-duplicates, because the coasting floor barely moves between them
-# (1.02x; the leftover is non-zonal, see the docs). What actually earns its channels is the pair
-# of REFERENCE heights: rung 2 alone 0.8127 -> rung 2 + refs 0.8274 under the nonlinear model.
-# So the lean set drops the two redundant rungs, not the comparison baselines, for 0.003 AUC.
-#
-# The multi-rung form is kept behind --residual-ladder-full: rung-to-rung drops are the diagnostic
-# that told us the residual floor is not zonal, and that may not hold in another regime or against
-# another force model. Caveat: the ablation above is per-frame and memoryless, while the backbones
-# here are sequence models -- rung 0 is dominated by the J2 along-track projection, a smooth
-# function of orbital phase that a sequence model could in principle use as a phase reference for
-# the local floor. Untested; --residual-ladder-full vs. default is the A/B (see runResidLadderAB.sh).
-RESIDUAL_LADDER_LEAN_INDICES = (2, 3, 4)
-
-
-def residualLadderChannelNames(full=False):
-    if full:
-        return RESIDUAL_LADDER_ALL_CHANNEL_NAMES
-    return tuple(RESIDUAL_LADDER_ALL_CHANNEL_NAMES[i] for i in RESIDUAL_LADDER_LEAN_INDICES)
-
-
-def residualLadderChannelCount(full=False):
-    return len(residualLadderChannelNames(full))
+from seqData import *  # noqa: F401,F403 -- residual-ladder names, label conventions, data loading
 
 
 strAdd = ""
@@ -416,11 +309,8 @@ if useEnergyRate:
 if useJ2Energy:
     strAdd = strAdd + "J2Energy_"
 if useResidualLadder:
-    # Tagged with the explicit channel count rather than a bare "ResidLadder_": the A/B this flag
-    # exists for compares 3 vs 5 channels, so the count has to be in the log stem or the two arms
-    # land in the same parsed_data directory and silently overwrite each other (exactly the
-    # collision displaySeqLogData.py's _suffix was fixed for). Note logs already on disk tagged
-    # "ResidLadder_" predate this switch and are 5-channel runs.
+    # channel count in the tag so 3- and 5-channel runs don't overwrite each other; old logs tagged
+    # bare "ResidLadder_" are 5-channel
     strAdd = strAdd + f"ResidLadder{residualLadderChannelCount(useResidualLadderFull)}_"
 if useOE:
     strAdd = strAdd + "OE_"
@@ -489,616 +379,6 @@ if save_to_log:
 
 
 # ---------------------------------------------------------------------------
-# Class/label conventions shared by data loading, training, and reporting
-# ---------------------------------------------------------------------------
-CLASS_ORDER = ["Chemical", "Electric", "ImpBurn", "NoThrust"]
-JOINT_LABELS = {"NoThrust": 0, "Chemical": 1, "Electric": 2, "ImpBurn": 3}
-JOINT_CLASS_NAMES = ["No Thrust", "Chemical", "Electric", "Impulsive"]
-STAGE1_CLASS_NAMES = ["No Thrust", "Thrust"]
-STAGE2_CLASS_NAMES = ["Chemical", "Electric", "Impulsive"]
-
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-def _getThrustingTime(npz_dict, class_name, N, T, warn_if_missing=True):
-    if 'thrustingTime' in npz_dict:
-        return npz_dict['thrustingTime']
-    if warn_if_missing:
-        print(f"[prepareInSequenceThrustClassificationDatasets] WARNING: '{class_name}' has no "
-              f"'thrustingTime' key -- defaulting to all-background per-timestep labels. This is "
-              f"expected until the upstream GMAT-Thrust-Data dataset fix lands; per-timestep "
-              f"labels for {class_name} will be wrong until then.")
-    return np.zeros((N, T, 1))
-
-
-def _decomposeSinusoids(states, num_sinusoids):
-    """states: [N,T,C] -> [N,T,C*num_sinusoids]. Every (IC, channel) time series is decomposed
-    independently: an FFT along the time axis picks the `num_sinusoids` frequency bins with the
-    largest magnitude (excluding the DC bin, which is just that channel's mean over the window, not
-    an oscillation), and each selected bin is reconstructed as its own real sinusoid signal
-    A*cos(2*pi*m*t/T + phase) of length T. The K reconstructed component signals REPLACE the single
-    raw channel, so C channels become C*num_sinusoids -- e.g. 6 ECI channels with num_sinusoids=3
-    yields 18, grouped as [chan0_comp0, chan0_comp1, chan0_comp2, chan1_comp0, ...].
-
-    Components are ordered by descending magnitude per (IC, channel), so component 0 is always that
-    trajectory's single most dominant oscillation for that channel, component 1 the next, etc.,
-    regardless of which absolute frequency bin that turns out to be -- the network is fed a stable
-    "1st/2nd/3rd dominant mode" ordering rather than fixed frequency bins that fit some trajectories
-    (e.g. NoThrust, near-periodic) and not others (e.g. a burn mid-window)."""
-    N, T, C = states.shape
-    max_components = T // 2  # non-DC rfft bins: 1..T//2 (T//2+1 bins total incl. DC, and Nyquist if T even)
-    if num_sinusoids > max_components:
-        print(f"[_decomposeSinusoids] WARNING: requested {num_sinusoids} sinusoids but only "
-              f"{max_components} non-DC frequency bins are available for T={T}; clamping.")
-        num_sinusoids = max_components
-
-    freqs = np.fft.rfft(states, axis=1)   # [N, T//2+1, C] complex
-    mag = np.abs(freqs)
-    mag[:, 0, :] = -1.0                   # exclude the DC bin from selection
-
-    order = np.argsort(-mag, axis=1)[:, :num_sinusoids, :]         # [N,K,C] bin indices, descending magnitude
-    amp = np.take_along_axis(mag, order, axis=1)                    # [N,K,C]
-    phase = np.angle(np.take_along_axis(freqs, order, axis=1))      # [N,K,C]
-
-    # A real signal's rfft coefficients need a factor of 2/T to reconstruct amplitude, except the
-    # Nyquist bin (T even only), which has no conjugate partner and needs 1/T.
-    nyquist_bin = T // 2 if T % 2 == 0 else -1
-    scale = np.where(order == nyquist_bin, 1.0, 2.0) / T            # [N,K,C]
-
-    t = np.arange(T).reshape(1, T, 1, 1)
-    m = order.reshape(N, 1, num_sinusoids, C)
-    a = (amp * scale).reshape(N, 1, num_sinusoids, C)
-    p = phase.reshape(N, 1, num_sinusoids, C)
-
-    components = a * np.cos(2 * np.pi * m * t / T + p)              # [N,T,K,C]
-    return components.transpose(0, 1, 3, 2).reshape(N, T, C * num_sinusoids)
-
-
-def _applyTransforms(states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False, useResidualLadderFull=False):
-    if useNoise:
-        for c in CLASS_ORDER:
-            states_by_class[c] = apply_noise(states_by_class[c], pos_noise_std, vel_noise_std)
-
-    # orbitalEnergy() is a Cartesian quantity: it reads Y[:,0:3] as position and Y[:,3:6] as
-    # velocity. --OE overwrites states_by_class with orbital elements below, so snapshot the raw
-    # ECI states first and compute energy from those. Feeding orbital elements to it instead
-    # evaluates 0.5*||(Omega,omega,M0)||^2 - mu/||(a,e,i)||, a quantity that correlates only ~0.25
-    # with true orbital energy and destroys the whole premise of the feature (energy is ~constant
-    # under two-body coasting, so departures from constant are the thrust residual).
-    eci_by_class = None
-    if useOE and (useEnergy or useEnergyRate):
-        eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
-
-    # Physics-loss inputs (--physics-loss-weight) and the residual ladder (--residual-ladder) both
-    # need raw dimensional (km, km/s) ECI Cartesian state regardless of what --OE/--norm do to
-    # states_by_class below -- unlike eci_by_class above, this snapshot is taken unconditionally
-    # (not gated on useOE) so it stays correct even under --norm alone. It is taken AFTER
-    # apply_noise, so under --noise the ladder measures the residual of the noisy trajectory the
-    # model actually sees rather than a clean one the model has no access to.
-    phys_eci_by_class = None
-    if usePhysicsLoss or useResidualLadder:
-        phys_eci_by_class = {c: states_by_class[c].copy() for c in CLASS_ORDER}
-
-    oe_by_class = None
-    if useOE:
-        from qutils.orbital import ECI2OE
-        oe_by_class = {}
-        for c in CLASS_ORDER:
-            s = states_by_class[c]
-            n_ic, T = s.shape[0], s.shape[1]
-            oe = np.zeros((n_ic, T, 7))
-            for i in range(n_ic):
-                for j in range(T):
-                    oe[i, j, :] = ECI2OE(s[i, j, 0:3], s[i, j, 3:6])
-            if useNorm:
-                R = 6378.1363
-                oe[:, :, 0] = oe[:, :, 0] / R
-            oe_by_class[c] = oe
-            states_by_class[c] = oe[:, :, 0:6]
-    elif useNorm:
-        from qutils.orbital import dim2NonDim6
-        for c in CLASS_ORDER:
-            s = states_by_class[c]
-            for i in range(s.shape[0]):
-                s[i, :, :] = dim2NonDim6(s[i, :, :])
-            states_by_class[c] = s
-
-    if useEnergy or useEnergyRate:
-        from qutils.orbital import orbitalEnergy
-        energy_by_class = {}
-        rate_by_class = {}
-        # norming_energy is a single scalar shared across all 4 classes (taken from the first
-        # class processed), recomputed fresh on every _applyTransforms call -- when --test names a
-        # different orbit/system count than --orbit, train and test energy (and energy rate) get
-        # normalized by DIFFERENT scalars, a pre-existing train/test scale inconsistency under
-        # --norm --energy --test <different orbit>, not introduced or fixed here.
-        norming_energy = None
-        for c in CLASS_ORDER:
-            # eci_by_class is set only under --OE; otherwise states_by_class is still Cartesian
-            # (dimensional, or non-dimensionalized by dim2NonDim6 under --norm) and is used as-is.
-            s = states_by_class[c] if eci_by_class is None else eci_by_class[c]
-            n_ic, T = s.shape[0], s.shape[1]
-            energy = np.zeros((n_ic, T, 1))
-            if useJ2Energy:
-                # J2-inclusive specific energy: the Keplerian form below is NOT conserved under
-                # J2, so its rate measures J2 potential exchange (~55x the amplitude of a
-                # low-thrust electric signature) far more than it measures any thrust. See
-                # orbitalEnergyJ2 and scripts/two_body/analyzeThrustSeparability.py. Vectorized
-                # over the whole [N,T,6] block, unlike orbitalEnergy's per-row loop.
-                from qutils.orbital import orbitalEnergyJ2
-                energy[:, :, 0] = orbitalEnergyJ2(s)
-            else:
-                for i in range(n_ic):
-                    energy[i, :, 0] = orbitalEnergy(s[i, :, :])
-            if useNorm:
-                if norming_energy is None:
-                    norming_energy = energy[0, 0, 0]
-                energy[:, :, 0] = energy[:, :, 0] / norming_energy
-            if useEnergyRate:
-                # diff is linear, so computing the rate after normalization above is equivalent to
-                # normalizing a raw-energy rate -- order doesn't change the numeric result. prepend
-                # gives t=0 a rate of exactly 0 (no prior point) in one call.
-                rate_by_class[c] = np.diff(energy, axis=1, prepend=energy[:, :1, :])
-            energy_by_class[c] = energy
-
-        extra_channels = {}
-        for c in CLASS_ORDER:
-            parts = ([energy_by_class[c]] if useEnergy else []) + \
-                    ([rate_by_class[c]] if useEnergyRate else [])
-            extra_channels[c] = np.concatenate(parts, axis=2)
-
-        # Energy/energy-rate are ADDITIONAL channels, never a replacement. The previous else-branch
-        # assigned extra_channels directly, so --energy or --energyRate without --OE silently
-        # dropped all six ECI channels and trained on the single energy scalar alone.
-        base = oe_by_class if oe_by_class is not None else states_by_class
-        for c in CLASS_ORDER:
-            states_by_class[c] = np.concatenate((base[c], extra_channels[c]), axis=2)
-
-    if useResidualLadder:
-        # Hierarchical residual decomposition (--residual-ladder): 5 additional channels appended
-        # to whatever --OE/--energy/--energyRate leave behind, never a replacement (same policy as
-        # the energy channels above). Computed from the raw dimensional ECI snapshot, so these
-        # channels are identical with and without --OE/--norm -- unlike --energy, which silently
-        # changes meaning under --norm (see norming_energy above). See _computeResidualLadder.
-        for c in CLASS_ORDER:
-            ladder = _computeResidualLadder(phys_eci_by_class[c], full=useResidualLadderFull)
-            states_by_class[c] = np.concatenate((states_by_class[c], ladder), axis=2)
-
-    if numSinusoids > 0:
-        # Decomposes whatever channels the rest of _applyTransforms leaves behind (raw ECI, OE,
-        # and/or the energy/energy-rate channels above) -- runs last so it always sees the final
-        # per-timestep feature set, not the pre-OE/pre-energy Cartesian states.
-        for c in CLASS_ORDER:
-            states_by_class[c] = _decomposeSinusoids(states_by_class[c], numSinusoids)
-
-    return states_by_class, phys_eci_by_class
-
-
-PHYS_LOSS_DT_SECONDS = 60.0  # GMAT generation scripts' fixed propagation step (see
-                              # gmat/scripts/generateSpacecraftThrusts.py / generateSpacecraftEThrusts.py: dt = 60.0)
-
-
-def _computePhysicsResidualTensors(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS):
-    """eci_states: [N,T,6] raw ECI Cartesian (km, km/s), pre-OE/pre-norm (see phys_eci_by_class in
-    _applyTransforms). Returns (h2, h36, g0, residual_accel), each [N,T]:
-      g0             = mu/|r|^2          two-body gravitational accel magnitude (km/s^2)
-      h2             = j2AccelMag(r)/g0  dimensionless J2-to-two-body ratio (orbit-invariant
-                                          formula; VALUE naturally shrinks with altitude)
-      h36            = j3to6AccelMag(r)/g0  dimensionless combined-J3-J6-to-two-body ratio
-      residual_accel = |dE/dt| / |v|     thrust-accel-scale estimate: a finite-difference energy
-                       residual divided by the real sample interval (not left as a raw per-index
-                       delta, since this pathway compares against absolute physical accelerations)
-                       and converted power->accel via /|v|.
-
-    E here is orbitalEnergyJ2 -- the J2-INCLUSIVE specific energy -- NOT the Keplerian
-    v^2/2 - mu/r that --energy/--energyRate use by default.
-
-    mu is fixed to qutils.orbital.MU_EARTH_JGM2 throughout (energy, g0, h2, h36) for internal
-    self-consistency of the log-ratio comparison in _load_and_label.
-    """
-    from qutils.orbital import MU_EARTH_JGM2, orbitalEnergyJ2, twoBodyAccel, j2AccelMag, j3to6AccelMag
-
-    r = eci_states[..., 0:3]                                          # [N,T,3]
-    v_mag = np.linalg.norm(eci_states[..., 3:6], axis=-1)             # [N,T]
-
-    energy = orbitalEnergyJ2(eci_states, mu=MU_EARTH_JGM2)            # [N,T]
-    energy_rate = np.diff(energy, axis=1, prepend=energy[:, :1]) / dt_seconds
-    residual_accel = np.abs(energy_rate) / np.maximum(v_mag, 1e-9)    # [N,T], km/s^2
-
-    g0 = twoBodyAccel(r, mu=MU_EARTH_JGM2)
-    h2 = j2AccelMag(r, mu=MU_EARTH_JGM2) / g0
-    h36 = j3to6AccelMag(r, mu=MU_EARTH_JGM2) / g0
-    return h2, h36, g0, residual_accel
-
-
-# Floor applied to every dimensionless ratio before the log. The quantities of interest sit around
-# 1e-6..1e-3 (see the docstring), so 1e-12 is ~6 decades below anything meaningful: it exists only
-# to keep an incidental near-zero energy-rate crossing from becoming a -inf/-30 spike that would
-# dominate --standardize's mean/std for the whole channel.
-RESIDUAL_LADDER_FLOOR = 1e-12
-
-
-def _computeResidualLadder(eci_states, dt_seconds=PHYS_LOSS_DT_SECONDS, full=False):
-    """Hierarchical residual decomposition. eci_states: [N,T,6] raw ECI Cartesian (km, km/s),
-    pre-OE/pre-norm (see phys_eci_by_class in _applyTransforms). Returns [N,T,C] float32, where
-    C is 3 for the default lean set (deepest rung + both reference heights) and 5 with full=True
-    (every rung). All five are always computed -- the switch only selects which are returned, so
-    the two forms are guaranteed bit-identical on the channels they share. See
-    RESIDUAL_LADDER_LEAN_INDICES for the ablation behind that default.
-
-    The idea: dE/dt under a given dynamics truncation measures exactly those accelerations the
-    truncation leaves out. So evaluating the energy residual at successively richer truncations
-    gives a ladder of noise floors, and a thrust reveals itself at the rung where it first stands
-    above the floor:
-
-      rung 0 (two-body):    floor is J2 potential exchange, ~2.7e-6 km/s^2 in LEO
-      rung 1 (+J2):         floor drops ~55x to ~9.9e-8 km/s^2 -- J3-J6, tesserals, drag
-      rung 2 (+J2..J6):     floor is whatever is left (tesseral/sectoral terms, drag, noise)
-
-    That is a direct encoding of the domain fact this feature exists for: chemical thrust is
-    O(J2) so it is visible at every rung, while electric thrust is O(J3-J6) so it only clears the
-    floor at rungs 1-2. Rather than asserting that as a loss penalty (--physics-loss-weight,
-    which is discarded at inference), it hands the model the measurements the assertion is about
-    and lets it use them at every forward pass.
-
-    All five channels are dimensionless (divided by g0 = mu/r^2) and log10-scaled:
-
-      * dimensionless, so the same channel means the same thing in LEO and GEO -- the raw
-        accelerations differ by ~3 decades between regimes but the ratios do not, which is what
-        makes this regime-agnostic in the same sense as the --physics-loss-weight gate.
-      * log10, because the prior is about ORDERS OF MAGNITUDE. In the log domain "the residual
-        sits at the J2 rung" is a subtraction, so a linear layer can express it; in the linear
-        domain it is a ratio spanning 4+ decades that a standardized channel cannot resolve.
-
-    Channels 3-4 are the reference rung heights a_J2/g0 and a_J3toJ6/g0. They are deterministic
-    functions of r and so carry no new information in principle, but they are what the residual
-    rungs must be COMPARED against, and in log space channel_k - channel_3 is exactly "how many
-    decades is the residual above the J2 rung" -- the comparison the domain fact is stated in.
-
-    mu/Re/J_n are fixed to the qutils JGM2 constants throughout, matching
-    _computePhysicsResidualTensors, so the two pathways cannot disagree about rung heights.
-    """
-    from qutils.orbital import (MU_EARTH_JGM2, orbitalEnergyZonal, twoBodyAccel,
-                                j2AccelMag, j3to6AccelMag)
-
-    r = eci_states[..., 0:3]                                          # [N,T,3]
-    v_mag = np.linalg.norm(eci_states[..., 3:6], axis=-1)             # [N,T]
-    g0 = twoBodyAccel(r, mu=MU_EARTH_JGM2)                            # [N,T]
-    # |dE/dt| / |v| converts specific power to a thrust-acceleration scale; the further /g0 makes
-    # it dimensionless. Folded into one denominator so it is clamped once.
-    denom = np.maximum(v_mag * g0, 1e-30)
-
-    T = eci_states.shape[1]
-    rungs = []
-    for degrees in ((), (2,), (2, 3, 4, 5, 6)):
-        E = orbitalEnergyZonal(eci_states, degrees=degrees, mu=MU_EARTH_JGM2)   # [N,T]
-        rate = np.zeros_like(E)
-        if T > 1:
-            rate[:, 1:] = np.diff(E, axis=1) / dt_seconds
-            # t=0 has no prior sample. Copy t=1's rate rather than np.diff's usual prepend-zero:
-            # an exact 0 here would floor to log10(1e-12) and put a -12 outlier in every single
-            # trajectory's first frame, skewing --standardize's per-channel statistics.
-            rate[:, 0] = rate[:, 1]
-        rungs.append(np.abs(rate) / denom)
-
-    rungs.append(j2AccelMag(r, mu=MU_EARTH_JGM2) / g0)
-    rungs.append(j3to6AccelMag(r, mu=MU_EARTH_JGM2) / g0)
-
-    ladder = np.stack(rungs, axis=-1)                                 # [N,T,5]
-    if not full:
-        ladder = ladder[..., list(RESIDUAL_LADDER_LEAN_INDICES)]      # [N,T,3]
-    return np.log10(np.maximum(ladder, RESIDUAL_LADDER_FLOOR)).astype(np.float32)
-
-
-def _load_and_label(loc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std, usePhysicsLoss=False, useJ2Energy=False, useResidualLadder=False, useResidualLadderFull=False):
-    states_by_class = {}
-    thrusting_by_class = {}
-    for class_name in CLASS_ORDER:
-        npz = np.load(f"{loc}/statesArray{class_name}.npz")
-        states = npz[f"statesArray{class_name}"]
-        N, T = states.shape[0], states.shape[1]
-        tt = _getThrustingTime(npz, class_name, N, T, warn_if_missing=(class_name != "NoThrust"))
-        states_by_class[class_name] = states
-        thrusting_by_class[class_name] = tt
-
-    n_ic_per_class = [states_by_class[c].shape[0] for c in CLASS_ORDER]
-    T_per_class = [states_by_class[c].shape[1] for c in CLASS_ORDER]
-    assert len(set(T_per_class)) == 1, f"Timestep count mismatch across classes: {dict(zip(CLASS_ORDER, T_per_class))}"
-
-    states_by_class, phys_eci_by_class = _applyTransforms(
-        states_by_class, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids,
-        pos_noise_std, vel_noise_std, usePhysicsLoss, useJ2Energy, useResidualLadder,
-        useResidualLadderFull)
-
-    states_cat = np.concatenate([states_by_class[c] for c in CLASS_ORDER], axis=0)
-
-    joint_labels_list = [thrusting_by_class[c].squeeze(-1).astype(np.int64) * JOINT_LABELS[c] for c in CLASS_ORDER]
-    y_joint = np.concatenate(joint_labels_list, axis=0)
-
-    phys_target_ce, phys_gate_ce = None, None
-    if usePhysicsLoss:
-        h2_parts, h36_parts, g0_parts, resid_parts = [], [], [], []
-        for c in CLASS_ORDER:
-            h2_c, h36_c, g0_c, resid_c = _computePhysicsResidualTensors(phys_eci_by_class[c])
-            h2_parts.append(h2_c); h36_parts.append(h36_c)
-            g0_parts.append(g0_c); resid_parts.append(resid_c)
-        h2 = np.concatenate(h2_parts, axis=0)
-        h36 = np.concatenate(h36_parts, axis=0)
-        g0 = np.concatenate(g0_parts, axis=0)
-        residual_accel = np.concatenate(resid_parts, axis=0)
-
-        log_resid = np.log(np.maximum(residual_accel, 1e-30))
-        log_aJ2 = np.log(np.maximum(h2 * g0, 1e-30))
-        log_aJ36 = np.log(np.maximum(h36 * g0, 1e-30))
-        # Chemical-vs-Electric term (--mode joint/stage2): physics-only pseudo-target, independent
-        # of the true label -- does the empirical thrust-accel-scale estimate look closer (in
-        # log-space) to the J2 scale (Chemical-like, target=1) or the combined J3-J6 scale
-        # (Electric-like, target=0)?
-        pseudo_target_ce = (np.abs(log_resid - log_aJ2) < np.abs(log_resid - log_aJ36)).astype(np.float32)
-
-        # Only Chemical/Electric-labeled frames get any physics-loss contribution; NoThrust and
-        # Impulsive are gated out entirely (gate=0 there).
-        is_chem_or_elec = (y_joint == JOINT_LABELS["Chemical"]) | (y_joint == JOINT_LABELS["Electric"])
-        gate_ce = np.where(is_chem_or_elec, (h2 + h36).astype(np.float32), 0.0).astype(np.float32)
-
-        if is_chem_or_elec.any():
-            print(f"[physics-loss] chem/elec gate (h2+h36) over {int(is_chem_or_elec.sum())} "
-                  f"Chemical/Electric frames: mean={gate_ce[is_chem_or_elec].mean():.3e}, "
-                  f"max={gate_ce.max():.3e} (naturally shrinks toward 0 at higher altitude -- LEO "
-                  f"~1e-3 vs. GEO several orders of magnitude smaller, since J2/J3-J6 fall off as "
-                  f"~1/r^4..1/r^8)")
-
-        # A Thrust-vs-NoThrust ('detect') term used to live here, targeting the NoThrust/Electric
-        # boundary via 'is residual_accel above the J3-J6 floor'. It was REMOVED after
-        # scripts/two_body/analyzeThrustSeparability.py measured the quantities it assumed:
-        #   - measured residual_accel on pure COASTING frames is ~2.7e-6 km/s^2, while a_J3-J6 is
-        #     ~3.8e-8 -- so that pseudo-target was true on essentially every frame, teaching the
-        #     model "everything is thrust".
-        #   - the background is a ZERO-MEAN J2 oscillation (median signed dE/dt on NoThrust is
-        #     exactly 0.0) of amplitude ~2.7e-6, and electric thrust contributes a constant-sign
-        #     bias of only ~+2.0e-7 -- a 1:13 ratio, giving per-frame Electric-vs-NoThrust
-        #     ROC AUC ~0.52 (chance). No threshold rescues an uninformative feature: recalibrating
-        #     it merely flips the target to 0 on true Electric frames, which would supervise the
-        #     model to MISS Electric.
-        # The signal that does separate them is the SIGNED, orbit-integrated energy change
-        # (AUC 0.652 over one full orbit, rising with window length), which is a trajectory-level
-        # quantity and does not fit this per-timestep loss. Chemical needs no such help: it sits
-        # ~12x above the background and is already perfectly separable (AUC 1.000).
-        phys_target_ce, phys_gate_ce = pseudo_target_ce, gate_ce
-
-    return states_cat, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce
-
-
-def _deriveStage1Stage2(y_joint, pad_idx=-100):
-    """y_joint: [...,] any shape of 4-class per-timestep labels (0=NoThrust,1=Chemical,
-    2=Electric,3=Impulsive) -> (y_stage1, y_stage2). y_stage1 is the binary 'is thrust
-    occurring' label; y_stage2 remaps Chemical/Electric/Impulsive to 0/1/2 and masks every
-    non-thrusting position to pad_idx, so a type classifier is never supervised on background
-    frames. Shared by the DataLoader-building path and the classic-ML/PCA+MLP row-based paths."""
-    y_stage1 = (y_joint > 0).astype(np.int64)
-    y_stage2 = np.full_like(y_joint, pad_idx)
-    for src, dst in ((1, 0), (2, 1), (3, 2)):
-        y_stage2[y_joint == src] = dst
-    return y_stage1, y_stage2
-
-
-def _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=None):
-    """One IC-index permutation applied identically to every class block, so the same underlying
-    initial condition (IC index i, shared across all 4 class npz files since each generator run
-    reseeds the same RNG) always lands in the same split regardless of which thrust-type file it
-    appears in -- prevents leaking near-duplicate pre-thrust dynamics across train/val/test.
-    Assumes every class shares the same number of ICs."""
-    assert len(set(n_ic_per_class)) == 1, f"_icGroupSplit assumes equal IC counts per class, got {n_ic_per_class}"
-    n_ic = n_ic_per_class[0]
-
-    n_train = int(np.floor(train_ratio * n_ic))
-    n_val = int(np.floor(val_ratio * n_ic))
-    n_test = n_ic - n_train - n_val
-    assert n_test > 0, "Ratios leave no ICs for test; reduce train/val."
-
-    rng = np.random.default_rng(seed)
-    perm = rng.permutation(n_ic)
-    train_ic = perm[:n_train]
-    val_ic = perm[n_train:n_train + n_val]
-    test_ic = perm[n_train + n_val:]
-
-    groups = np.tile(np.arange(n_ic, dtype=np.int64), len(n_ic_per_class))
-    train_mask = np.isin(groups, train_ic)
-    val_mask = np.isin(groups, val_ic)
-    test_mask = np.isin(groups, test_ic)
-    return train_mask, val_mask, test_mask
-
-
-def _computeOversamplingWeights(y_joint, num_classes):
-    """y_joint: [N,T] training-split joint labels -> weights[N] for a WeightedRandomSampler.
-    Random-oversamples whole trajectories (rather than individual timesteps, which would break
-    the temporal context LSTM/Mamba need) by weighting each trajectory toward the rarest
-    per-timestep class it contains: weight_i = max over classes c present in trajectory i of
-    (1 / count_c), so a trajectory touching a rare class (e.g. a single Chemical burst minute) is
-    drawn more often regardless of how much NoThrust background padding surrounds it, while
-    NoThrust-only trajectories keep the baseline weight."""
-    counts = np.bincount(y_joint.reshape(-1), minlength=num_classes).astype(np.float64)
-    inv_freq = counts.sum() / np.clip(counts, 1.0, None)
-    weights = np.array([inv_freq[np.unique(row)].max() for row in y_joint], dtype=np.float64)
-    return weights
-
-
-def _standardizeSplits(train_data, val_data, test_data, supress_print=False):
-    """Z-scores each feature channel using TRAIN-split statistics only, applied identically to val
-    and test. Returns (train, val, test, mu, sigma).
-
-    Fitting on train alone is what keeps this from leaking: computing val/test statistics from
-    their own splits would let information about held-out orbits reach the model through the
-    scaling constants. Channels with zero variance in train (a constant feature) are left alone
-    rather than divided by ~0."""
-    C = train_data.shape[2]
-    flat = train_data.reshape(-1, C)
-    mu = flat.mean(axis=0)
-    sigma = flat.std(axis=0)
-    degenerate = sigma < 1e-12
-    sigma = np.where(degenerate, 1.0, sigma)
-
-    if not supress_print:
-        if degenerate.any():
-            print(f"Standardize: channels {np.flatnonzero(degenerate).tolist()} are constant in "
-                  f"train; left unscaled.")
-        print(f"Standardize: per-channel train mean range [{mu.min():.4g}, {mu.max():.4g}], "
-              f"std range [{sigma.min():.4g}, {sigma.max():.4g}] -> all channels z-scored")
-
-    out = tuple((d - mu) / sigma for d in (train_data, val_data, test_data))
-    return out + (mu, sigma)
-
-
-def prepareInSequenceThrustClassificationDatasets(
-    yaml_config, data_config,
-    train_ratio=0.7, val_ratio=0.15, test_ratio=0.15,
-    pos_noise_std=1e-3, vel_noise_std=1e-3,
-    batch_size=16, pad_idx=-100, seed=None,
-    supress_print=False, return_meta=False, oversample=False, standardize=False,
-):
-    """Loads all 4 thrust-type classes (Chemical, Electric, ImpBurn, NoThrust) and builds
-    per-timestep labels for three views of the same data:
-      - joint:  4-class per-timestep label (0=NoThrust,1=Chemical,2=Electric,3=Impulsive)
-      - stage1: binary per-timestep 'is thrust occurring' label (0/1)
-      - stage2: 3-class per-timestep thrust-type label (0=Chemical,1=Electric,2=Impulsive),
-                masked to pad_idx on every non-thrusting timestep so a type classifier is never
-                supervised on background frames.
-    Assumes equal ICs per class and that IC index i refers to the same underlying orbit across
-    all 4 class files. Per-timestep 'thrustingTime' ground truth is defensively loaded -- a class
-    file missing the key degrades to all-background labels with a printed warning rather than
-    raising.
-
-    oversample: if True, train_loader draws whole training trajectories with replacement via a
-    WeightedRandomSampler (see _computeOversamplingWeights) instead of a plain shuffle, so
-    trajectories containing rarer per-timestep classes are seen more often each epoch. val_loader
-    and test_loader are never resampled.
-
-    standardize: if True, z-score every feature channel using TRAIN-split statistics only (val and
-    test are transformed with the train mean/std, never their own). Off by default so existing
-    results stay reproducible, but strongly recommended for any flag combination that leaves
-    channels on wildly different scales -- notably --OE, whose channels span the semi-major axis
-    (~6.7e3 km) and eccentricity (~1e-5) simultaneously, an 8-order-of-magnitude spread that
-    saturates LSTM/Mamba gates on the first layer and collapses training to majority-class
-    prediction. See _standardizeSplits.
-
-    yaml_config['numSinusoids']: if > 0, replaces every feature channel with this many dominant
-    sinusoidal components extracted per trajectory via FFT (see _decomposeSinusoids), applied as
-    the last step of _applyTransforms -- so it decomposes whatever channels --OE/--energy/
-    --energyRate leave behind. C channels become C*numSinusoids (e.g. 6 ECI channels with
-    numSinusoids=3 yields 18), and standardize (if also on) fits on those expanded channels.
-    """
-    useOE = yaml_config['useOE']
-    useNorm = yaml_config['useNorm']
-    useNoise = yaml_config['useNoise']
-    useEnergy = yaml_config['useEnergy']
-    useEnergyRate = yaml_config['useEnergyRate']
-    numSinusoids = yaml_config['numSinusoids']
-    usePhysicsLoss = yaml_config.get('usePhysicsLoss', False)
-    useJ2Energy = yaml_config.get('useJ2Energy', False)
-    useResidualLadder = yaml_config.get('useResidualLadder', False)
-    useResidualLadderFull = yaml_config.get('useResidualLadderFull', False)
-
-    numMinProp = yaml_config['prop_time']
-    train_set = yaml_config['orbit']
-    systems = yaml_config['systems']
-    test_set = yaml_config['test_dataset']
-    test_systems = yaml_config['test_systems']
-
-    dataLoc = data_config['seqClassification'] + train_set + "/" + str(numMinProp) + "min-" + str(systems)
-    dataLoc_test = data_config['seqClassification'] + test_set + "/" + str(numMinProp) + "min-" + str(test_systems)
-
-    if not supress_print:
-        print(f"Training data location: {dataLoc}")
-        print(f"Test data location: {dataLoc_test}")
-
-    states, y_joint, n_ic_per_class, phys_target_ce, phys_gate_ce = _load_and_label(
-        dataLoc, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-        usePhysicsLoss, useJ2Energy, useResidualLadder, useResidualLadderFull
-    )
-    if phys_target_ce is None:
-        phys_target_ce = np.zeros_like(y_joint, dtype=np.float32)
-        phys_gate_ce = np.zeros_like(y_joint, dtype=np.float32)
-
-    train_mask, val_mask, test_mask = _icGroupSplit(n_ic_per_class, train_ratio, val_ratio, test_ratio, seed=seed)
-
-    train_data, train_joint = states[train_mask], y_joint[train_mask]
-    train_phys_target_ce, train_phys_gate_ce = phys_target_ce[train_mask], phys_gate_ce[train_mask]
-    val_data, val_joint = states[val_mask], y_joint[val_mask]
-    val_phys_target_ce, val_phys_gate_ce = phys_target_ce[val_mask], phys_gate_ce[val_mask]
-
-    if test_set != train_set or test_systems != systems:
-        states_t, y_joint_t, n_ic_per_class_t, phys_target_ce_t, phys_gate_ce_t = _load_and_label(
-            dataLoc_test, useOE, useNorm, useNoise, useEnergy, useEnergyRate, numSinusoids, pos_noise_std, vel_noise_std,
-            usePhysicsLoss, useJ2Energy, useResidualLadder, useResidualLadderFull
-        )
-        if phys_target_ce_t is None:
-            phys_target_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
-            phys_gate_ce_t = np.zeros_like(y_joint_t, dtype=np.float32)
-        _, _, test_mask_t = _icGroupSplit(n_ic_per_class_t, train_ratio, val_ratio, test_ratio, seed=seed)
-        test_data, test_joint = states_t[test_mask_t], y_joint_t[test_mask_t]
-        test_phys_target_ce, test_phys_gate_ce = phys_target_ce_t[test_mask_t], phys_gate_ce_t[test_mask_t]
-    else:
-        test_data, test_joint = states[test_mask], y_joint[test_mask]
-        test_phys_target_ce, test_phys_gate_ce = phys_target_ce[test_mask], phys_gate_ce[test_mask]
-
-    # Standardization sits after the split (so statistics come from train only) and before the
-    # loaders/raw arrays are handed out, keeping the neural and classic-ML paths on identical
-    # features -- the Hankel-window baselines consume train_data/val_data/test_data directly.
-    if standardize:
-        train_data, val_data, test_data, _, _ = _standardizeSplits(
-            train_data, val_data, test_data, supress_print=supress_print)
-
-    train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
-    val_stage1, val_stage2 = _deriveStage1Stage2(val_joint, pad_idx)
-    test_stage1, test_stage2 = _deriveStage1Stage2(test_joint, pad_idx)
-
-    if not supress_print:
-        print(f"train_data {train_data.shape}  val_data {val_data.shape}  test_data {test_data.shape}")
-
-    def _make_loader(data, yj, y1, y2, y_pt_ce, y_pg_ce, shuffle, sampler=None):
-        ds = TensorDataset(
-            torch.from_numpy(data),
-            torch.from_numpy(yj).long(),
-            torch.from_numpy(y1).long(),
-            torch.from_numpy(y2).long(),
-            torch.from_numpy(y_pt_ce).double(),
-            torch.from_numpy(y_pg_ce).double(),
-        )
-        if sampler is not None:
-            return DataLoader(ds, batch_size=batch_size, sampler=sampler, pin_memory=True)
-        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
-
-    train_sampler = None
-    if oversample:
-        weights = _computeOversamplingWeights(train_joint, num_classes=len(JOINT_LABELS))
-        train_sampler = WeightedRandomSampler(torch.from_numpy(weights), num_samples=len(weights), replacement=True)
-        if not supress_print:
-            print(f"Oversampling enabled: train_loader weights range [{weights.min():.3f}, {weights.max():.3f}]")
-
-    train_loader = _make_loader(train_data, train_joint, train_stage1, train_stage2,
-                                 train_phys_target_ce, train_phys_gate_ce,
-                                 train_sampler is None, sampler=train_sampler)
-    val_loader = _make_loader(val_data, val_joint, val_stage1, val_stage2,
-                               val_phys_target_ce, val_phys_gate_ce, False)
-    test_loader = _make_loader(test_data, test_joint, test_stage1, test_stage2,
-                                test_phys_target_ce, test_phys_gate_ce, False)
-
-    result = (train_loader, val_loader, test_loader,
-              train_data, train_joint, val_data, val_joint, test_data, test_joint)
-
-    if return_meta:
-        meta = {
-            "class_names_joint": JOINT_CLASS_NAMES,
-            "class_names_stage1": STAGE1_CLASS_NAMES,
-            "class_names_stage2": STAGE2_CLASS_NAMES,
-            "n_ic_per_class": n_ic_per_class,
-        }
-        return result + (meta,)
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Models -- every backbone emits logits: [B, T, num_classes] (per-timestep, not pooled)
 # ---------------------------------------------------------------------------
 class LSTMSequenceClassifier(nn.Module):
@@ -1117,17 +397,9 @@ class LSTMSequenceClassifier(nn.Module):
 
 
 class MambaSequenceClassifier(nn.Module):
-    """Bi-directional Mamba: one forward scan and one over the time-reversed input, with the two
-    per-timestep hidden states concatenated before the classification head.
-
-    Mamba's selective scan is causal, which made this the ONLY backbone in the file that could not
-    see a thrust event's trailing edge when labelling a timestep inside it -- LSTMSequenceClassifier
-    sets bidirectional=True, TransformerSequenceClassifier applies no causal mask, and
-    InceptionModule convolves with symmetric padding=k//2. So every Mamba-vs-other comparison here
-    was partly a directionality comparison rather than an architecture one. The reverse scan removes
-    that confound. Two independent Mamba stacks (not one with shared weights) -- forward and
-    backward dynamics are genuinely different functions, and weight sharing would force one set of
-    SSM parameters to model both. Costs ~2x the parameters and ~2x the training time."""
+    """Bi-directional Mamba: independent forward and time-reversed stacks, per-timestep states
+    concatenated before the head. Every other backbone here sees both directions, so a causal-only
+    Mamba would confound architecture with directionality. ~2x params and training time."""
     def __init__(self, config, input_size, hidden_size, num_layers, num_classes):
         super().__init__()
         self.hidden_size = hidden_size
@@ -1148,11 +420,8 @@ class MambaSequenceClassifier(nn.Module):
 
 
 class TransformerSequenceClassifier(nn.Module):
-    """Encoder-only Transformer with a learnable positional embedding, adapted from the
-    whole-trajectory script's CLS-token-pooled TransformerClassifier. The CLS token is dropped
-    entirely here -- per-timestep classification doesn't need a single global summary token, and
-    keeping it would just complicate the position bookkeeping. The classification head is
-    applied to every timestep of the encoder output instead."""
+    """Encoder-only Transformer with a learnable positional embedding and a per-timestep head
+    (the whole-trajectory version's CLS token is dropped)."""
     def __init__(self, input_size, hidden_size, num_layers, num_classes, nhead=8, dim_feedforward=64, dropout=0.1, max_len=4096):
         super().__init__()
 
@@ -1188,11 +457,8 @@ class TransformerSequenceClassifier(nn.Module):
 
 
 class InceptionModule(nn.Module):
-    """One InceptionTime module: a 1x1 bottleneck feeding parallel odd-kernel convs plus a
-    max-pool branch, concatenated along channels. GroupNorm (not BatchNorm) so training is
-    robust to the size-1 trailing batch that an undivided dataset can produce. All branches are
-    same-length-preserving (padding=k//2 / maxpool stride=1,padding=1), so this needs no changes
-    to support a per-timestep head downstream."""
+    """One InceptionTime module: 1x1 bottleneck -> parallel odd-kernel convs + max-pool branch,
+    concatenated. Length-preserving; GroupNorm so a size-1 trailing batch is fine."""
     def __init__(self, in_channels, n_filters=32, kernel_sizes=(9, 19, 39), bottleneck_channels=32):
         super().__init__()
         self.use_bottleneck = in_channels > 1
@@ -1276,18 +542,9 @@ def build_model(backbone, num_classes, input_size, hidden_size, num_layers):
 
 
 # ---------------------------------------------------------------------------
-# "hybrid" backbone -- not a single per-timestep nn.Module like the ones above. Stage 1
-# (detector) is a whole-trajectory MiniRocket classifier: the same num_kernels=10000,
-# rocket_transform='minirocket' RocketClassifier already used for whole-trajectory comparisons
-# in mambaTimeSeriesClassificationGMATThrusts.py, fit on the *entire* ~30-step trajectory rather
-# than a sliding window. MiniRocket's PPV-pooling transform is calibrated to and gets its power
-# from the full series it's fit on -- an early windowed-per-timestep version of this backbone
-# chopped each trajectory into many short, heavily-overlapping sub-series, starving the kernels
-# of signal and working against MiniRocket's actual design. Stage 2 (type classifier) is the
-# same CNN (InceptionTime) per-timestep model used elsewhere in this script. Consequently
-# 'hybrid' only participates in cascade/stage-solo modes -- there is no single joint 4-class
-# hybrid model, and stage 1's binary decision applies to a whole trajectory ("does this
-# ~30-minute window contain a thrust event anywhere"), not to individual timesteps.
+# "hybrid" backbone: stage 1 is a whole-trajectory MiniRocket detector (does this window contain
+# thrust anywhere, broadcast to every timestep); stage 2 is the per-timestep CNN. Cascade and
+# stage-solo modes only -- there is no joint hybrid model.
 # ---------------------------------------------------------------------------
 def printMiniROCKETSize(model):
     import pickle
@@ -1347,12 +604,9 @@ def _default_label_sets(mode, num_classes):
 
 def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.float32, device="cpu",
                           scheme="effective", beta=0.999):
-    """scheme='effective': class-balanced weights from the effective number of samples
-    (Cui et al. 2019, 'Class-Balanced Loss Based on Effective Number of Samples'),
-    weight_c ~ (1-beta) / (1 - beta**n_c). Scales more gently than raw inverse frequency as
-    beta -> 1, which matters here since the NoThrust:other ratio swings from ~2:1 to ~99:1
-    across class files/modes -- plain inverse frequency would give the rare classes wildly
-    different weight magnitudes across runs. scheme='inverse': plain N/count_c weighting."""
+    """scheme='effective': class-balanced weights (1-beta)/(1-beta**n_c) (Cui et al. 2019), gentler
+    than inverse frequency when imbalance swings from ~2:1 to ~99:1 across modes.
+    scheme='inverse': N/count_c."""
     counts = torch.zeros(num_classes, dtype=torch.long)
     with torch.no_grad():
         for _, y_joint, y_stage1, y_stage2, _, _ in loader:
@@ -1373,11 +627,8 @@ def _infer_class_weights(loader, num_classes, mode, pad_idx=-100, dtype=torch.fl
 
 
 class FocalLoss(nn.Module):
-    """Multi-class focal loss (Lin et al. 2017) with per-class weight and ignore_index support,
-    matching nn.CrossEntropyLoss's interface. Down-weights the loss contribution of
-    already-well-classified timesteps -- typically the dominant NoThrust background -- so
-    gradient stays concentrated on hard/ambiguous frames (e.g. thrust onset/offset) rather than
-    on class rarity alone, complementing the --loss-scheme class weights."""
+    """Multi-class focal loss (Lin et al. 2017) with class weights and ignore_index, same interface
+    as nn.CrossEntropyLoss. Focuses gradient on hard frames (e.g. thrust onset/offset)."""
 
     def __init__(self, gamma=2.0, weight=None, ignore_index=-100):
         super().__init__()
@@ -1395,26 +646,11 @@ class FocalLoss(nn.Module):
 
 
 def physicsConsistencyLoss(logits, mode, y_phys_target, y_phys_gate, eps=1e-8):
-    """logits: [B,T,C] (mode in ('joint','stage2') only); y_phys_target/y_phys_gate: [B,T] float
-    (see _load_and_label's usePhysicsLoss branch -- gate is already 0 outside Chemical/Electric-
-    labeled frames, and naturally shrinks toward 0 at high altitude, since h2=a_J2/g0 and
-    h36=a_J3-6/g0 fall off steeply with r while thruster accel does not).
-
-    Chemical-vs-Electric magnitude-scale consistency. Reuses the model's OWN existing logit margin
-    as a binary prediction (no new head, no new parameters):
-      mode='joint':  margin = logits[...,Chemical] - logits[...,Electric]
-      mode='stage2': margin = logits[...,0] - logits[...,1]  (Chemical=0, Electric=1 --
-                      _deriveStage1Stage2)
-
-    A Thrust-vs-NoThrust ('detect') term was removed after measurement refuted its premise -- see
-    the note in _load_and_label and scripts/two_body/analyzeThrustSeparability.py. This term's own
-    premise did verify: Chemical's measured residual (~3.4e-5 km/s^2) sits within ~3x of a_J2 and
-    ~12x above Electric's (~2.9e-6), a real and separable magnitude gap.
-
-    Trains that margin toward the physics pseudo-target via BCEWithLogitsLoss, weighted
-    per-timestep by y_phys_gate, averaged only over gated frames in the batch. Returns a scalar
-    0.0 (never nan) when a batch has no gated frames, so it can never poison the additive total
-    loss via torch.isnan."""
+    """Pushes the model's existing Chemical-vs-Electric logit margin toward the physics pseudo-target
+    (is the measured residual nearer a_J2 or a_J3-6?) with BCE, weighted per timestep by
+    y_phys_gate (0 outside Chemical/Electric frames, fading toward 0 at high altitude).
+    logits [B,T,C], mode 'joint' or 'stage2'; targets/gate [B,T]. Returns 0.0, never nan, when no
+    frame is gated."""
     if mode == "joint":
         margin = logits[..., JOINT_LABELS["Chemical"]] - logits[..., JOINT_LABELS["Electric"]]
     elif mode == "stage2":
@@ -1433,20 +669,11 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
                  pad_idx=-100, class_weights=None, schedulerPatience=3, verbose=True,
                  loss_scheme=None, cb_beta=None, focal_gamma=None, physics_loss_weight=None,
                  restore_best=True, lr=1e-3, restore_metric="loss"):
-    """restore_best: on return, load back the weights from the epoch with the lowest validation
-    loss instead of leaving the model at its final epoch. Early stopping already tracks that
-    epoch; without the restore, training continues for ESpatience epochs past the optimum and the
-    caller evaluates whatever state it drifted into. That biases any comparison across capacity or
-    learning rate specifically, since larger models and higher learning rates overfit furthest in
-    those trailing epochs -- exactly the configurations such a comparison exists to measure.
-    Pass False to reproduce the previous last-epoch behaviour.
-
-    restore_metric: which validation signal defines "best", for both the restore and the
-    early-stopping counter. 'loss' (default) keeps existing behaviour. 'event_f1' tracks event
-    macro-F1 instead, and is what any caller ranking models by F1 should use -- under this
-    dataset's imbalance the two do not coincide, and checkpointing on loss measurably selects the
-    worse-F1 model (0.4448 last-epoch vs 0.4096 best-loss on one leo/30min LSTM fit). Track the
-    metric you are actually selecting on."""
+    """restore_best: reload the best-validation epoch's weights on return instead of keeping the last
+    epoch (False reproduces the old behaviour).
+    restore_metric: what "best" means for both the restore and early stopping -- 'loss' (default)
+    or 'event_f1'. Use 'event_f1' when ranking models by F1; under this imbalance the best-loss
+    epoch can have noticeably worse F1."""
     model = model.to(device)
     param_dtype = torch.float64
     model = model.double()
@@ -1503,10 +730,8 @@ def train_model(model, train_loader, val_loader, num_epochs, num_classes, mode,
             loss = criterion(logits.reshape(B * T, C), labels.reshape(B * T))
 
             if torch.isnan(loss):
-                # every position in this batch was pad_idx (e.g. a stage2 batch with no
-                # thrusting frames at all) -- ignore_index reduction has nothing to average
-                # over. Skip the update: backward() on a nan loss would poison every
-                # parameter with nan permanently.
+                # all-pad batch (e.g. stage2 with no thrust frames): skip, a nan backward would
+                # poison every parameter
                 skipped_train_batches += 1
                 continue
 
@@ -1654,31 +879,16 @@ def _findSegments(row, c):
 
 def _eventLevelReport(y_true_grid, y_pred_grid, class_names, print_report=True,
                        valid_from=0, granularity_note=None):
-    """y_true_grid/y_pred_grid: [N,T] int arrays in JOINT_LABELS space (index 0 = NoThrust/
-    background). Complements _reportFromPredictions's per-timestep numbers with segment-level
-    precision/recall per nonzero class -- catches cases where per-timestep accuracy looks fine but
-    the model is scattering wrong-class predictions across a trajectory ("flicker"), which
-    per-timestep metrics average away.
-
-    A true/predicted event is a maximal contiguous run of one class along the time axis for one
-    row (_findSegments). Detection is "any overlap" (point-adjust, Xu et al. 2018): a true event
-    counts as recalled if ANY timestep within its span is predicted as that class; a predicted
-    event counts as a false positive only if it has ZERO overlap with any true event of that class
-    in that row.
-
-    valid_from: columns before this index have no real prediction (Hankel-window classic-ML/
-    PCA+MLP grids hardcode the first hankel_L-1 timesteps to background -- see
-    predictClassicPerTimestep/predictPCAMLPPerTimestep). True events entirely before valid_from
-    are excluded from the recall denominator (no real prediction ever had a chance to catch them)
-    rather than scored as automatic misses -- matching how evaluateClassicPerTimestep already
-    drops those frames from the per-timestep metric. Predicted-segment search always covers the
-    full row (the padded prefix is hardcoded to class 0, so it can never contribute a spurious
-    nonzero segment).
-
-    granularity_note: optional caveat printed under the table, for predictions whose "segment" is
-    coarser than genuine per-timestep localization (e.g. MiniRocket/hybrid-stage1's whole-
-    trajectory broadcast, where recall collapses to whole-trajectory detection).
-    """
+    """Segment-level precision/recall per thrust class, to catch flicker that per-timestep metrics
+    average away. y_true_grid/y_pred_grid: [N,T] in JOINT_LABELS space.
+    
+    An event is a maximal run of one class in a row. A true event is recalled if any of its frames
+    is predicted as that class (point-adjust, Xu et al. 2018); a predicted event is a false positive
+    only if it overlaps no true event of that class.
+    
+    valid_from: leading columns with no real prediction (Hankel-window models pad hankel_L-1 frames);
+    true events entirely before it are left out of recall.
+    granularity_note: caveat printed under the table, e.g. for whole-trajectory broadcasts."""
     assert -100 not in np.unique(y_true_grid) and -100 not in np.unique(y_pred_grid), \
         "_eventLevelReport expects JOINT_LABELS-space grids (no pad_idx) -- got a masked/stage2 grid"
 
@@ -1723,27 +933,12 @@ def _eventLevelReport(y_true_grid, y_pred_grid, class_names, print_report=True,
 
 
 def smoothPerTimestepGrid(pred_grid, max_gap, no_thrust_label=0):
-    """pred_grid: [N,T] int labels in JOINT_LABELS space. Closes short INTERIOR gaps in the binary
-    'any thrust' view: a run of no_thrust_label frames of length <= max_gap that has a thrusting
-    prediction immediately before AND after it (i.e. touches neither end of the row) gets filled
-    in. This ONLY ever closes gaps -- it never erases a predicted-positive run, however short. That
-    asymmetry is deliberate: a majority-vote window or a minimum-run-length filter erases short
-    positive runs, and a lone true positive is indistinguishable from a lone false positive by
-    shape alone, so those filters trade real detections for flicker removal. Gap-closing has no
-    such failure mode -- it fills the model's missed frames INSIDE one real event and never touches
-    an isolated positive, which is why Chemical's event recall is measurably unchanged by it while
-    the longer classes can only gain (see sweepSmoothGap.py).
-
-    The 's == 0 or e == T-1' edge check also transparently handles the classic-ML/PCA+MLP Hankel-
-    window padded prefix (see buildHankelWindowRowsPerTimestep/predictClassicPerTimestep): a
-    no_thrust_label run touching the row's start is never closed, whether it's a genuine leading
-    NoThrust stretch or a hardcoded pad -- no hankel_L-specific handling needed here.
-
-    Filled frames' TYPE (which of Chemical/Electric/Impulsive) is forward-filled from the frame
-    immediately before the gap, matching this file's existing Impulsive forward-fill precedent
-    (_getThrustingTime/_forwardFillFromFirstEvent) rather than inventing a new imputation rule.
-
-    max_gap <= 0 is a no-op (returns pred_grid unchanged, default/off behavior)."""
+    """Close interior NoThrust gaps of length <= max_gap that have thrust on both sides, taking the
+    type from the frame before the gap. pred_grid: [N,T] in JOINT_LABELS space.
+    
+    Only closes gaps, never removes short positive runs, so it can't erase a real short burst the
+    way majority-vote or minimum-run filters can. Runs touching either end of a row (including the
+    Hankel pad prefix) are left alone. max_gap <= 0 is a no-op."""
     if max_gap <= 0:
         return pred_grid
     out = pred_grid.copy()
@@ -1761,19 +956,9 @@ def smoothPerTimestepGrid(pred_grid, max_gap, no_thrust_label=0):
 def _reportEventLevelWithSmoothing(y_true_grid, pred_grid, class_names, smooth_max_gap=0,
                                     plot_name=None, plot_save_path=None, mode_label="Joint",
                                     valid_from=0, granularity_note=None, print_report=True):
-    """Shared event-level report+plot hook for every joint/cascade call site in the file (see
-    smoothPerTimestepGrid). Runs _eventLevelReport (+ plotSequencePrediction, if plot_name/
-    plot_save_path given) on the RAW pred_grid exactly as before this flag existed, then -- only
-    if smooth_max_gap > 0 -- a second, clearly labeled pass on the gap-closed grid, saved to a
-    '_smoothed'-suffixed plot path. The raw report always runs and is never replaced, so the
-    payoff (or lack thereof) of --smooth-max-gap is always visible side by side rather than
-    silently swapped in.
-
-    Deliberately does NOT feed into _reportFromPredictions' flat per-timestep accuracy/
-    classification-report numbers anywhere -- those stay on raw predictions everywhere in this
-    file. Gap-closing is an event-shape correction, not a general accuracy claim, and per-timestep
-    accuracy is dominated by the NoThrust majority class regardless, so it wouldn't move much and
-    would just blur what this flag is actually for."""
+    """Event-level report (+ plot if plot_name/plot_save_path) on the raw grid, then -- if
+    smooth_max_gap > 0 -- again on the gap-closed grid, plot suffixed '_smoothed'. Per-timestep
+    metrics always stay on raw predictions."""
     _eventLevelReport(y_true_grid, pred_grid, class_names, print_report=print_report,
                        valid_from=valid_from, granularity_note=granularity_note)
     if plot_name is not None and plot_save_path is not None:
@@ -1845,28 +1030,16 @@ def _predictPerTimestepNeural(model, loader, device):
 
 
 def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, mode_label="Joint"):
-    """Plots true vs. predicted per-timestep class labels over time, one panel per class present
-    in y_true, using a representative example trajectory for each -- so a single figure shows how
-    well {model_name} tracks every class the model has to distinguish, not just one example.
-
-    y_true/y_pred: [N, T] per-timestep label grids in the SAME label space as class_names (index i
-    -> class_names[i]). That's the only requirement, so this same function plots joint 4-class
-    predictions from ANY backbone family: per-timestep neural models (via _predictPerTimestepNeural),
-    classic-ML/GBDT Hankel-window models (via predictClassicPerTimestep), PCA+MLP (via
-    predictPCAMLPPerTimestep), or a whole-trajectory model's single decision broadcast across every
-    timestep (MiniRocket/hybrid stage 1) -- whatever produced y_pred, once it's an [N, T] grid in
-    this label space.
-    """
+    """True vs. predicted per-timestep labels, one panel per class present in y_true, each on a
+    representative trajectory. y_true/y_pred: [N,T] in the same label space as class_names, from any
+    backbone family."""
     num_classes = len(class_names)
     example_rows = {}
     for c in range(num_classes):
         counts = (y_true == c).sum(axis=1)
         rows = np.where(counts > 0)[0]
         if rows.size:
-            # row with the MOST timesteps of class c, not just the first row containing any --
-            # background (class 0) appears in nearly every trajectory as padding around the
-            # actual event, so "first row containing any" trivially matches whatever trajectory
-            # happens to be first in eval order, even if it's dominated by a different class.
+            # row with the MOST timesteps of class c (background is in nearly every row)
             example_rows[c] = int(rows[np.argmax(counts[rows])])
 
     classes_present = sorted(example_rows.keys())
@@ -1906,25 +1079,11 @@ def plotSequencePrediction(model_name, y_true, y_pred, class_names, save_path, m
 def combineCascadePredictions(y_true_joint, y_true_stage1, pred_stage1, pred_stage2, print_report=True,
                                plot_name=None, plot_save_path=None, valid_from=0, granularity_note=None,
                                smooth_max_gap=0):
-    """y_true_joint/y_true_stage1/pred_stage1: [N,T]; pred_stage2: [N,T] in {0,1,2}. Combines
-    stage1 (thrust yes/no) and stage2 (Chemical/Electric/Impulsive) predictions into a single
-    4-class per-timestep prediction and reports both the combined result and a stage1-vs-stage2
-    error decomposition -- so a cascade shortfall is diagnosable as bad detection vs. bad typing.
-    Backbone-agnostic: works whether stage1/stage2 came from matching neural models or the mixed
-    MiniRocket-detector + CNN-type-classifier 'hybrid' backbone.
-
-    If plot_name/plot_save_path are given, also saves a seqpred plot of the combined 4-class
-    result against y_true_joint (same per-timestep grid plotSequencePrediction uses for joint
-    models), so cascade predictions are visually comparable to the joint models' plots.
-
-    valid_from/granularity_note are forwarded to _eventLevelReport (see there) -- pass
-    valid_from=hankel_L-1 for classic-ML/PCA+MLP cascades (their grids pad the first hankel_L-1
-    timesteps with a hardcoded background prediction) and a granularity_note for whole-trajectory-
-    broadcast stage-1 decisions (MiniRocket/hybrid).
-
-    smooth_max_gap: forwarded to _reportEventLevelWithSmoothing (see smoothPerTimestepGrid) --
-    0 (default) is a no-op. Only the event-level report/plot below sees the gap-closed grid; the
-    stage1/end-to-end flat metrics after this block always use the RAW (unsmoothed) final_pred."""
+    """Combine stage-1 (thrust yes/no) and stage-2 (type) predictions into one 4-class [N,T] grid and
+    report it, plus a detection-vs-typing error split. pred_stage2 is in {0,1,2}.
+    plot_name/plot_save_path: also save a seqpred plot of the combined result.
+    valid_from/granularity_note: passed to _eventLevelReport.
+    smooth_max_gap: event-level report/plot only; flat metrics use the raw prediction."""
     final_pred = np.where(pred_stage1 == 0, 0, pred_stage2 + 1)
 
     _reportEventLevelWithSmoothing(y_true_joint, final_pred, JOINT_CLASS_NAMES,
@@ -1967,19 +1126,14 @@ def runCascadeEvaluation(stage1_model, stage2_model, loader, device, print_repor
 
 
 # ---------------------------------------------------------------------------
-# Classic ML / GBDT per-timestep baselines (LightGBM/XGBoost/CatBoost/RandomForest/ExtraTrees).
-# Unlike MiniRocket, tree-based models have no global-pooling requirement -- a windowed context
-# feature vector per timestep is a perfectly natural row for them, so (unlike 'hybrid') these
-# operate at genuine per-timestep granularity via a sliding trailing window, mirroring the
-# whole-trajectory script's pca_mode="hankel" windowing minus its final mean-pool over time.
+# Classic ML / GBDT per-timestep baselines (LightGBM/XGBoost/CatBoost/RandomForest/ExtraTrees):
+# one row per timestep from a trailing Hankel window.
 # ---------------------------------------------------------------------------
 def buildHankelWindowRowsPerTimestep(states, labels, hankel_L=5, pad_idx=-100, drop_masked=True):
-    """states: [N,T,C], labels: [N,T] -> X[M, C*hankel_L], y[M], row_index[M,2] (ic,t). One row
-    per (IC, timestep) with t >= hankel_L-1; earlier timesteps lack enough left context and are
-    dropped (a small, documented data loss -- e.g. ~13% of frames at hankel_L=5,T=30). If
-    drop_masked, rows where labels==pad_idx are also dropped (GBDTs/sklearn have no ignore_index
-    concept). Rows come out ordered by timestep (outer) then IC (inner) -- relied on by
-    predictClassicPerTimestep to reshape flat predictions back to [N,T]."""
+    """states: [N,T,C], labels: [N,T] -> X[M, C*hankel_L], y[M], row_index[M,2] (ic,t).
+    One row per (IC, t) with t >= hankel_L-1 (earlier frames lack context and are dropped, ~13% at
+    hankel_L=5, T=30). drop_masked also drops pad_idx rows. Ordered t-outer/IC-inner, which
+    predictClassicPerTimestep relies on to reshape back to [N,T]."""
     N, T, C = states.shape
     rows_X, rows_y, rows_idx = [], [], []
     for t in range(hankel_L - 1, T):
@@ -2074,11 +1228,7 @@ def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data,
     t.toc()
     size_fn(clf2)
 
-    # Classic-ML models have no per-epoch training loop, so -- unlike the neural backbones, whose
-    # Stage 2 gets a genuine standalone 3-class evaluation for free as part of its own per-epoch
-    # validation -- Stage 2 here would otherwise never be scored except gated through Stage 1's
-    # predictions in the combined cascade report below. Score it standalone first so cascade
-    # shortfalls stay diagnosable as bad detection vs. bad typing, matching the neural comparison.
+    # score stage 2 standalone too, so a weak cascade is diagnosable as bad detection vs. bad typing
     print(f"\n{name} Stage 2 (Type Classifier) Standalone Validation")
     evaluateClassicPerTimestep(clf2, eval_data, eval_stage2, STAGE2_CLASS_NAMES,
                                 hankel_L=hankel_L, pad_idx=pad_idx, print_report=True)
@@ -2116,10 +1266,7 @@ def runClassicMLModes(name, classifier_ctor, size_fn,
 
 
 # ---------------------------------------------------------------------------
-# PCA+MLP per-timestep baseline. Same Hankel-window row framing as the classic-ML baselines
-# above, but with a StandardScaler+PCA reduction (fit on the train split only) feeding a small
-# MLP -- mirroring the whole-trajectory script's --pca/--mlp comparison, adapted from one
-# time-averaged row per trajectory to one windowed row per timestep.
+# PCA+MLP per-timestep baseline: Hankel-window rows -> StandardScaler+PCA (train split) -> MLP.
 # ---------------------------------------------------------------------------
 class MLP(nn.Module):
     def __init__(self, d_in, n_classes, width=64, depth=1, p_drop=0.1):
@@ -2316,48 +1463,19 @@ def runPCAMLPCascade(train_data, train_joint, val_data, val_joint, eval_data, ev
 
 
 # ---------------------------------------------------------------------------
-# Per-timestep MiniRocket baseline (--minirocket). Genuine end-to-end sequence classification in
-# both joint and cascade modes, at the same granularity as every other backbone here.
+# Per-timestep MiniRocket baseline (--minirocket), joint and cascade. Each timestep gets its
+# trailing MINIROCKET_WINDOW frames; one transform feeds three ridge heads (joint, stage 1,
+# stage 2) that share one Gram matrix. Normal equations are accumulated in chunks, so memory is
+# independent of N*T.
 #
-# Shape of the thing: each timestep gets the trailing MINIROCKET_WINDOW frames ending at it, so a
-# [N,T,C] batch becomes N*T short series; MiniRocket transforms those once, and three ridge heads
-# (joint 4-class, stage-1 binary, stage-2 3-class) are solved on that ONE feature matrix. The
-# transform is label-agnostic, so cascade is nearly free once joint exists -- only the K x n_class
-# right-hand side differs, the K x K Gram is shared.
-#
-# Two earlier claims in this file were wrong and are corrected here, both measured on
-# leo/30min-1500 with the IC-grouped split:
-#
-#  * "a windowed per-timestep version starves the kernels of signal, so stage 1 must be whole-
-#    trajectory." Window length is not what binds. Sweeping MINIROCKET_WINDOW over 9/15/21/30
-#    moves per-timestep macro-F1 by less than the seed-to-seed spread, and at 30 (the full
-#    trajectory, causally left-padded) it is no better than at 9. The real limit is that PPV
-#    pooling is a *summary statistic over the window* -- it answers "what fraction of this span
-#    exceeded a threshold", which is exactly right for typing a whole trajectory and structurally
-#    wrong for localizing an event to one timestep. Widening the window adds context and dilutes
-#    localization by the same amount, so the two cancel. Hence 9: the shortest window the kernels
-#    accept, and nothing is paid for a longer one.
-#
-#  * "MiniRocket only supports whole-series input, so joint only." It supports whatever series you
-#    hand it. What actually broke before was memory: materializing the N*T x K feature matrix and
-#    handing it to RidgeClassifierCV, which upcasts to float64 and runs generalized cross-
-#    validation over it. _ridgeFit below accumulates normal equations in chunks instead, so peak
-#    memory is O(MINIROCKET_CHUNK * K + K^2) and independent of N*T.
-#
-# What to expect: ~0.72 joint / ~0.80 cascade macro-F1 on OE+Energy at 2436 kernels, against ~0.93
-# / ~0.95 for the CNN, and at-chance on raw ECI. It is a deliberately informative baseline rather
-# than a competitive one -- the same transform scores 0.99 typing a whole trajectory, so the gap
-# between those two numbers is a clean measurement of what pooling costs on a localization task.
+# Window 9 is the kernels' minimum; 9/15/21/30 all score within seed noise on leo/30min, because
+# PPV pooling summarizes the window rather than localizing within it. Expect ~0.72 joint / ~0.80
+# cascade macro-F1 (OE+Energy) vs ~0.93/~0.95 for the CNN; the same transform scores 0.99 on whole
+# trajectories, so the gap measures what pooling costs for localization.
 # ---------------------------------------------------------------------------
 def _minirocketWindows(states, window=MINIROCKET_WINDOW):
     """[N,T,C] -> (X[N*T, C, window] float32, idx[N*T, 2] of (ic, t)), ordered t-outer/ic-inner.
-
-    Left-edge-padded (the first frame repeated) so that EVERY timestep gets a real window and a
-    real prediction -- unlike buildHankelWindowRowsPerTimestep, which drops the first hankel_L-1
-    timesteps and forces them to background, and so has to pass valid_from=hankel_L-1 downstream.
-    Here valid_from stays 0. Padding costs accuracy on the leading frames (their windows are
-    largely a repeated constant), but that is a real cost of predicting them, not one hidden by
-    declining to."""
+    Left-padded by repeating the first frame, so every timestep gets a prediction (valid_from = 0)."""
     N, T, C = states.shape
     padded = np.concatenate([np.repeat(states[:, :1], window - 1, axis=1), states], axis=1)
     X = np.concatenate([padded[:, t:t + window, :].transpose(0, 2, 1) for t in range(T)])
@@ -2366,17 +1484,9 @@ def _minirocketWindows(states, window=MINIROCKET_WINDOW):
 
 
 def _fitMiniRocketTransform(X, num_kernels, fit_sample=20000, seed=None):
-    """MiniRocket's fit only picks dilations and bias quantiles, which a sample estimates as well
-    as the full set does -- and fitting on all N*T windows is the slowest step by far. Sample
-    RANDOMLY, not by slicing: _minirocketWindows orders rows t-outer, so X[:n] would be every
-    window from the first few timesteps only, and bias quantiles would be calibrated to the start
-    of the trajectory.
-
-    random_state is threaded through to sktime, NOT just used for the subsample. MiniRocket draws
-    its bias quantiles from randomly chosen training examples, so leaving sktime's random_state at
-    None makes the whole backbone non-deterministic even under --seed: three runs at --seed 0
-    measured joint macro-F1 of 0.673 / 0.664 / 0.618, a spread wide enough to swamp the real
-    seed-to-seed spread the sweep's three seeds are meant to estimate."""
+    """Fit on a random sample of windows (the fit only picks dilations and bias quantiles). Random,
+    not X[:n]: rows are t-outer, so a prefix would calibrate to the first timesteps only.
+    random_state goes to sktime too -- left at None, three --seed 0 runs spread 0.62-0.67 macro-F1."""
     from sktime.transformations.panel.rocket import MiniRocketMultivariate
     tf = MiniRocketMultivariate(num_kernels=num_kernels, n_jobs=-1, random_state=seed)
     if len(X) > fit_sample:
@@ -2387,22 +1497,10 @@ def _fitMiniRocketTransform(X, num_kernels, fit_sample=20000, seed=None):
 
 
 def _minirocketChunks(tf, X, n_feat, mask=None):
-    """Stream the transform: yield (chunk_start, F_chunk) with F_chunk [rows, n_feat+1] float32,
-    the trailing all-ones column being the ridge intercept (so no separate centering pass).
-
-    The full [M, n_feat+1] matrix is deliberately NEVER materialized. M = N*T grows with the
-    propagation window, and at T=100 that is 420k x 2437 float32 = 3.8 GB for train alone, plus
-    ~1.1 GB more for a thrust-only stage-2 copy and 0.8 GB for eval -- ~5.7 GB live at once. On a
-    16 GB host, where MiniRocket runs LAST and so pays for the four class datasets, the torch/CUDA
-    context and four already-trained neural backbones still being resident, that is an OOM kill.
-    At T=30 the same arrays are 1.7 GB and fit, which is why only the 100-minute cells died.
-
-    Re-running the transform once per pass costs ~6s at T=100 against ~125s for the ridge solve it
-    feeds, so streaming is close to free. Peak is now one chunk: ~80 MB float32 plus its float64
-    copy, independent of M.
-
-    mask: optional [M] boolean. Rows are still transformed a full chunk at a time (simpler, and
-    still bounded) but only the kept rows are yielded; fully-masked chunks are skipped."""
+    """Stream the transform: yield (chunk_start, F_chunk [rows, n_feat+1] float32); the trailing ones
+    column is the ridge intercept. The full matrix is never built (at T=100 it would be ~5.7 GB
+    and OOM a 16 GB host); re-transforming per pass costs ~6s vs ~125s for the solve.
+    mask: optional [M] bool; only kept rows are yielded, fully-masked chunks skipped."""
     for i in range(0, len(X), MINIROCKET_CHUNK):
         sl = slice(i, i + MINIROCKET_CHUNK)
         keep = None
@@ -2418,17 +1516,10 @@ def _minirocketChunks(tf, X, n_feat, mask=None):
 
 
 def _ridgeFit(tf, X, n_feat, targets, mask=None, alpha=1.0):
-    """Ridge regression onto one-hot targets, accumulated chunk by chunk over a streamed transform.
-
-    Equivalent to sklearn's RidgeClassifier on this problem, but never holds more than one chunk in
-    float64: G is K x K and each B is K x n_class, both independent of the row count.
-
-    targets: list of (y, num_classes) over X's rows -> list of coefficient matrices. Several heads
-    are passed together because G = F^T F depends only on F, so fitting the joint 4-class and
-    stage-1 binary heads separately would build the same ~2437 x 2437 matrix twice -- measured at
-    ~124s each on a 126k-row 30-minute cell, i.e. the dominant cost of the whole backbone. Only the
-    B accumulation is per-head, and that is a K x n_class GEMM. Stage 2 still needs its own call:
-    masked to the thrust-frame subset, its G is genuinely a different matrix."""
+    """Ridge regression onto one-hot targets, accumulated chunk by chunk (equivalent to
+    RidgeClassifier, but only one chunk ever in float64). targets: list of (y, num_classes) -> list
+    of coefficient matrices. Heads passed together share the K x K Gram, which is the dominant cost
+    (~124s per build at 30 min); stage 2 needs its own call since it is masked to thrust frames."""
     P = n_feat + 1
     G = np.zeros((P, P))
     Bs = [np.zeros((P, n)) for _, n in targets]
@@ -2480,12 +1571,9 @@ def printMiniRocketRidgeSize(tf, head):
 def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad_idx, num_kernels,
                               run_joint, run_cascade, run_stage1_solo, run_stage2_solo,
                               smooth_max_gap=0):
-    """One shared windowed MiniRocket transform, then a ridge head per requested mode.
-
-    Every head is fitted BEFORE any is reported, and all eval predictions come from a single
-    streamed pass, so the printed blocks below are pure reporting. That ordering is forced by
-    memory, not style: features are never stored (see _minirocketChunks), so interleaving fit and
-    report would re-transform the data once per report."""
+    """One shared windowed MiniRocket transform, then a ridge head per requested mode. All heads are
+    fitted, and all eval predictions made in one streamed pass, before anything is reported --
+    features are never stored, so interleaving would re-transform per report."""
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
     eval_stage1, _ = _deriveStage1Stage2(eval_joint, pad_idx)
     N_eval, T_eval = eval_joint.shape
@@ -2545,11 +1633,8 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
     del X_train, X_eval
 
     # --- reporting only from here on ---------------------------------------------------------
-    # The log parser (displaySeqLogData.RE_ENTER / iter_blocks) slices the log into blocks running
-    # from one "Entering <X> Training[ Loop]" line to the next and attributes everything in a block
-    # to that X. So each head's "Entering" line must be immediately followed by that head's own
-    # output and nothing else -- printing two of them back to back, as an earlier version did, put
-    # the joint metrics inside the stage-1 block and dropped the joint row entirely.
+    # displaySeqLogData.py splits the log on "Entering <X> Training Loop", so each head's line
+    # must be followed directly by that head's own output.
     if run_joint:
         print("\nEntering MiniRocket (joint) Training Loop")
         print(f"\tElapsed time is {fit_s:.4f} seconds."
@@ -2587,11 +1672,8 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
         print(f"\tElapsed time is {fit2_s:.4f} seconds.")
         printMiniRocketRidgeSize(tf, W_s2)
 
-        # Standalone stage-2 score, on true-thrust frames only. Same reason runClassicCascade does
-        # it: without this, stage 2 is only ever seen gated through stage 1, and a weak cascade is
-        # not diagnosable as bad detection vs. bad typing. The header is word-for-word what
-        # RE_STAGE2_STANDALONE_HDR matches -- reword it and the cascade_stage2_standalone row
-        # silently disappears from the parsed CSVs.
+        # standalone stage-2 score on true-thrust frames (see runClassicCascade). The header must
+        # match displaySeqLogData's RE_STAGE2_STANDALONE_HDR exactly -- don't reword it.
         print("\nMiniRocket Stage 2 (Type Classifier) Standalone Validation")
         mask = y_eval_joint_flat > 0
         _reportFromPredictions(y_eval_joint_flat[mask] - 1, pred_s2[mask],
@@ -2816,10 +1898,7 @@ def main():
                                           class_names=STAGE2_CLASS_NAMES, print_report=True)
 
     # -----------------------------------------------------------------------
-    # Classic ML / GBDT + PCA+MLP + standalone MiniRocket baselines (Phase C) -- all operate on
-    # Hankel-windowed rows (buildHankelWindowRowsPerTimestep) rather than the [B,T,C] DataLoaders
-    # above, so they live outside the backbone loop, matching the whole-trajectory script's
-    # structure where these are one-shot blocks rather than part of a per-architecture loop.
+    # Classic ML / GBDT, PCA+MLP and MiniRocket baselines: windowed rows, outside the backbone loop.
     # -----------------------------------------------------------------------
     hankel_L = min(5, numMinProp)
 
@@ -2840,10 +1919,7 @@ def main():
     if use_xgboost:
         from xgboost import XGBClassifier
         from qutils.ml.classic.classifier import printClassicModelSize
-        # multi:softmax (not softprob) -- softprob's sklearn .predict() returns a per-class
-        # probability matrix instead of hard labels when num_class=2 (confirmed empirically;
-        # the whole-trajectory script's --xgboost never hits this since it's always 4-class).
-        # softmax returns 1D hard labels for any class count.
+        # multi:softmax, not softprob: softprob's .predict() returns probabilities when num_class=2
         ctor = lambda nc: XGBClassifier(objective="multi:softmax", num_class=nc, n_estimators=200, max_depth=6,
                                          learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
                                          eval_metric="mlogloss", n_jobs=-1)

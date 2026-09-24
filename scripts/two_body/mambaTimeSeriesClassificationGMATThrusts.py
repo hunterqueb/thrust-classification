@@ -53,6 +53,26 @@ parser.add_argument("--frame", type=str, default="eci", choices=["eci", "aer", "
                           "'aer' (Az/El/Range/rates, radar-realistic ground station), "
                           "'radec' (RA/Dec/rates, angles-only, optical-realistic ground station)")
 
+parser.add_argument("--seed", type=int, default=None,
+                     help="Seed the IC train/val/test split AND torch/numpy init. Tagged into the log stem "
+                          "as Seed<n>, LAST, so repeated seeds of one flag set land in separate logs.")
+parser.add_argument("--eval-test", dest="eval_test", action="store_true",
+                     help="Evaluate on the held-out test split even when the test orbit equals the train "
+                          "orbit (default reports the validation split early stopping selected on). "
+                          "Tagged as EvalTest_.")
+
+parser.add_argument("--seq-data", dest="seq_data", action="store_true",
+                     help="Load the in-sequence datasets (data.yaml's seqClassification root, random thrust "
+                          "onset) through the in-sequence script's own loader (seqData.py), so features, "
+                          "standardization and the IC split for a given --seed match that script exactly. "
+                          "Each trajectory's label is its file's class. Tagged as SeqData_.")
+parser.add_argument("--j2-energy", dest="use_j2_energy", action="store_true",
+                     help="--seq-data only: J2-inclusive energy instead of Keplerian (with --energy), as in the in-sequence script.")
+parser.add_argument("--residual-ladder", dest="use_residual_ladder", action="store_true",
+                     help="--seq-data only: append the 3 lean residual-ladder channels, as in the in-sequence script.")
+parser.add_argument("--standardize", action="store_true",
+                     help="--seq-data only: z-score every channel with train-split statistics. Tagged as Std_.")
+
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
 parser.set_defaults(noise=False)
@@ -106,6 +126,19 @@ use_random_forest = args.use_random_forest
 use_extra_trees = args.use_extra_trees
 use_cnn = args.use_cnn
 frame = args.frame
+runSeed = args.seed
+evalTest = args.eval_test
+useSeqData = args.seq_data
+useJ2Energy = args.use_j2_energy
+useResidualLadder = args.use_residual_ladder
+useStandardize = args.standardize
+# every eval site below reports on the held-out test split iff this is set
+evalOnTest = evalTest or testSet != orbitType
+
+if not useSeqData and (useJ2Energy or useResidualLadder or useStandardize):
+    parser.error("--j2-energy/--residual-ladder/--standardize require --seq-data")
+if useSeqData and (frame != "eci" or args.pca or args.useMLP):
+    parser.error("--seq-data supports --frame eci only, without --pca/--mlp (those use the qutils loader)")
 
 if frame != "eci":
     _disabled = []
@@ -141,10 +174,48 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 from qutils.tictoc import timer
 from qutils.ml.utils import getDevice, printModelParmSize
-from qutils.ml.classifer import trainClassifier, LSTMClassifier, validateMultiClassClassifier
-from qutils.ml.mamba import Mamba, MambaConfig, MambaClassifier
+from qutils.ml.classifer import trainClassifier, validateMultiClassClassifier
+from qutils.ml.mamba import Mamba, MambaConfig
 from qutils.ml.superweight import printoutMaxLayerWeight,getSuperWeight,plotSuperWeight, findMambaSuperActivation,plotSuperActivation
 from qutils.ml.shap import run_shap_analysis
+
+if runSeed is not None:
+    # the IC split in prepareThrustClassificationDatasets/loadGroundStationDataset draws from np.random
+    torch.manual_seed(runSeed)
+    np.random.seed(runSeed)
+
+class BiLSTMClassifier(nn.Module):
+    """Whole-trajectory counterpart of the seq script's LSTMSequenceClassifier: same
+    bidirectional LSTM -> unidirectional LSTM stack, classified from the last timestep."""
+    def __init__(self, input_dim, hidden_dim, num_layers, num_classes):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, bidirectional=True)
+        self.lstm2 = nn.LSTM(hidden_dim * 2, hidden_dim, num_layers, batch_first=True)
+        self.classifier = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x):
+        """x: [batch_size, seq_length, input_size]"""
+        out, _ = self.lstm(x)
+        out, _ = self.lstm2(out)
+        return self.classifier(out[:, -1, :])  # [B, num_classes]
+
+
+class BiMambaClassifier(nn.Module):
+    """Whole-trajectory counterpart of the seq script's MambaSequenceClassifier: independent
+    forward and time-reversed Mamba stacks, each summarized by the final step of its own scan
+    (so both have seen the whole trajectory), concatenated before the linear head."""
+    def __init__(self, config, num_classes):
+        super().__init__()
+        self.mamba = Mamba(config)
+        self.mamba_rev = Mamba(config)
+        self.fc = nn.Linear(config.d_inner * 2, num_classes)
+
+    def forward(self, x):
+        """x: [batch_size, seq_length, input_size]"""
+        fwd = self.mamba(x)[:, -1, :]               # [B, d_inner]
+        rev = self.mamba_rev(x.flip(1))[:, -1, :]   # [B, d_inner]
+        return self.fc(torch.cat([fwd, rev], dim=-1))
+
 
 #tranformer classifier for time series data
 class TransformerClassifier(nn.Module):
@@ -381,12 +452,21 @@ def eval_epoch(model, loader, device):
 strAdd = ""
 if frame != "eci":
     strAdd = strAdd + frame.upper() + "_"
+if useSeqData:
+    strAdd = strAdd + "SeqData_"
 if useEnergy:
     strAdd = strAdd + "Energy_"
+if useJ2Energy:
+    strAdd = strAdd + "J2Energy_"
+if useResidualLadder:
+    from seqData import residualLadderChannelCount
+    strAdd = strAdd + f"ResidLadder{residualLadderChannelCount()}_"
 if useOE:
     strAdd = strAdd + "OE_"
 if useNorm:
     strAdd = strAdd + "Norm_"
+if useStandardize:
+    strAdd = strAdd + "Std_"
 if useNoise:
     strAdd = strAdd + "Noise_"
 if useOnePass:
@@ -403,6 +483,10 @@ if testSet != orbitType:
     strAdd = strAdd + "Test_" + testSet + "_"
 if velNoise != 1e-3:
     strAdd = strAdd + f"VelNoise{velNoise}_"
+if evalTest and testSet == orbitType:
+    strAdd = strAdd + "EvalTest_"
+if runSeed is not None:
+    strAdd = strAdd + f"Seed{runSeed}_"   # LAST: runManuscriptTotal.sh mirrors the stem by concatenation
 # if pca_enabled:
 #     strAdd = strAdd + f"PCA{pca_n_components}_"
 # if useMLP:
@@ -565,6 +649,11 @@ def loadGroundStationDataset(
         val_data   = (val_data   - mean) / std
         test_data  = (test_data  - mean) / std
 
+    return _makeLoaders(train_data, train_label, val_data, val_label, test_data, test_label, batch_size)
+
+
+def _makeLoaders(train_data, train_label, val_data, val_label, test_data, test_label, batch_size=16):
+    """[N,T,C] arrays + [N,1] labels -> (loaders..., arrays...) in the tuple order main() unpacks."""
     from torch.utils.data import TensorDataset, DataLoader
     train_ds = TensorDataset(torch.from_numpy(train_data).double(), torch.from_numpy(train_label).squeeze(1).long())
     val_ds   = TensorDataset(torch.from_numpy(val_data).double(),   torch.from_numpy(val_label).squeeze(1).long())
@@ -574,6 +663,26 @@ def loadGroundStationDataset(
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, pin_memory=True)
 
     return train_loader, val_loader, test_loader, train_data, train_label, val_data, val_label, test_data, test_label
+
+
+def loadSeqDataset(yaml_config, data_config, train_ratio, val_ratio, test_ratio, batch_size=16):
+    """Whole-trajectory view of the in-sequence datasets, via the in-sequence script's own loader so
+    features, --standardize and the seeded IC split are identical to that script's. Label mapping is
+    shared (0=NoThrust,1=Chemical,2=Electric,3=Impulsive) and a trajectory only carries its own file's
+    class, so its label is the max over its per-timestep labels. Assumes every thrust-class trajectory
+    thrusts somewhere in the window (true for all leo/meo/geo 10/30/100min-1500 sets); one that didn't
+    would be labelled NoThrust."""
+    from seqData import prepareInSequenceThrustClassificationDatasets
+    cfg = dict(yaml_config, useEnergyRate=False, numSinusoids=0,
+               useJ2Energy=useJ2Energy, useResidualLadder=useResidualLadder)
+    _, _, _, train_data, train_joint, val_data, val_joint, test_data, test_joint = \
+        prepareInSequenceThrustClassificationDatasets(
+            cfg, data_config, train_ratio=train_ratio, val_ratio=val_ratio, test_ratio=test_ratio,
+            pos_noise_std=1e3*velNoise, vel_noise_std=velNoise, batch_size=batch_size,
+            seed=runSeed, standardize=useStandardize)
+    return _makeLoaders(train_data, train_joint.max(axis=1, keepdims=True),
+                        val_data, val_joint.max(axis=1, keepdims=True),
+                        test_data, test_joint.max(axis=1, keepdims=True), batch_size)
 
 
 def main():
@@ -616,7 +725,10 @@ def main():
         val_ratio = train_ratio  
         test_ratio = (1.0 - train_ratio - val_ratio) # not used in network training, only for splitting the data and final evaluation
 
-    if frame == "eci":
+    if useSeqData:
+        train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label = loadSeqDataset(
+            yaml_config, dataConfig, train_ratio, val_ratio, test_ratio)
+    elif frame == "eci":
         train_loader, val_loader, test_loader, train_data,train_label,val_data,val_label,test_data,test_label = prepareThrustClassificationDatasets(yaml_config,dataConfig,output_np=True,vel_noise_std=velNoise,pos_noise_std=1e3*velNoise,train_ratio=train_ratio,test_ratio=test_ratio,val_ratio=val_ratio,pca_enabled=pca_enabled,pca_mode="hankel",hankel_pool="mean")
     else:
         if pca_enabled:
@@ -646,7 +758,7 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()
 
     config = MambaConfig(d_model=input_size,n_layers = num_layers,expand_factor=hidden_size//input_size,d_state=32,d_conv=4,classifer=True)
-    model_mamba = MambaClassifier(config,input_size, hidden_size, num_layers, num_classes).to(device).double()
+    model_mamba = BiMambaClassifier(config, num_classes).to(device).double()
     optimizer_mamba = torch.optim.Adam(model_mamba.parameters(), lr=learning_rate)
 
     schedulerPatience = 5
@@ -676,7 +788,7 @@ def main():
         trainClassifier(model_hybrid,optimizer_hybrid,scheduler_hybrid,[train_loader,test_loader,val_loader],criterion,num_epochs,device,classLabels=classlabels)
         printModelParmSize(model_hybrid)
 
-        if testSet != orbitType:
+        if evalOnTest:
             validateMultiClassClassifier(model_hybrid,test_loader,criterion,num_classes,device,classlabels,printReport=True)
         else:
             validateMultiClassClassifier(model_hybrid,val_loader,criterion,num_classes,device,classlabels,printReport=True)
@@ -685,7 +797,7 @@ def main():
     if use_classic or use_xgboost or use_catboost or use_random_forest or use_extra_trees:
         X_train = train_data.reshape(train_data.shape[0], -1).astype(np.float32)    # (number of systems to train on, network features * length of time series)
         y_train = train_label.reshape(-1).astype(np.int32)             # (number of systems to train on,)
-        _eval_loader_classic = test_loader if testSet != orbitType else val_loader
+        _eval_loader_classic = test_loader if evalOnTest else val_loader
 
     if use_classic:
         from lightgbm import LGBMClassifier
@@ -783,7 +895,7 @@ def main():
         print1_NNModelSize(clf)
         print("\n1-NN Validation")
         dtwInference = timer()
-        if testSet != orbitType:
+        if evalOnTest:
             validate_1NN(clf, test_loader, num_classes, classlabels=classlabels)
         else:
             validate_1NN(clf, val_loader, num_classes, classlabels=classlabels)
@@ -851,7 +963,7 @@ def main():
         # [N,T,C] -> [N,C,T]
         train_data_MR = np.transpose(train_data, (0, 2, 1))
 
-        clf_mr = RocketClassifier(num_kernels=10000, rocket_transform='minirocket', n_jobs=-1)
+        clf_mr = RocketClassifier(num_kernels=10000, rocket_transform='minirocket', n_jobs=-1, random_state=runSeed)
         mrTimer = timer()
         clf_mr.fit(train_data_MR, train_label)
         mrTimer.toc()
@@ -859,12 +971,12 @@ def main():
 
         print("\nMiniRocket Validation")
         mrInference = timer()
-        _eval_loader_MR = test_loader if testSet != orbitType else val_loader
+        _eval_loader_MR = test_loader if evalOnTest else val_loader
         validate_minirocket(clf_mr, _eval_loader_MR, num_classes, classlabels=classlabels)
         mrInference.tocStr("MiniRocket Inference Time")
 
     if use_lstm:
-        model_LSTM = LSTMClassifier(input_size, hidden_size, num_layers, num_classes,SA=True).to(device).double()
+        model_LSTM = BiLSTMClassifier(input_size, int(3 * hidden_size // 4), num_layers, num_classes).to(device).double()
         optimizer_LSTM = torch.optim.Adam(model_LSTM.parameters(), lr=learning_rate)
         scheduler_LSTM = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer_LSTM,
@@ -878,7 +990,7 @@ def main():
         printModelParmSize(model_LSTM)
         print("\nLSTM Validation")
         LSTMInference = timer()
-        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_LSTM,_eval_loader,criterion,num_classes,device,classlabels,printReport=True)
         LSTMInference.tocStr("LSTM Inference Time")
         if frame == "aer":
@@ -914,7 +1026,7 @@ def main():
 
     print("\nMamba Validation")
     mambaInference = timer()
-    _eval_loader = test_loader if (testSet != orbitType) else val_loader
+    _eval_loader = test_loader if evalOnTest else val_loader
     validateMultiClassClassifier(model_mamba, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
     mambaInference.tocStr("Mamba Inference Time")
 
@@ -933,7 +1045,7 @@ def main():
 
         print("\nTransformer Validation")
         transformerInference = timer()
-        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         transformerInference.tocStr("Transformer Inference Time")
 
@@ -952,7 +1064,7 @@ def main():
 
         print("\n1D-CNN (InceptionTime) Validation")
         cnnInference = timer()
-        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_cnn, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         cnnInference.tocStr("1D-CNN (InceptionTime) Inference Time")
 
@@ -995,7 +1107,8 @@ def main():
         torch.save(model_mamba.state_dict(), f"{logLoc}mamba_"+ orbitType +"_"+strAdd+".pt")
 
     if find_SW:
-        magnitude, index = findMambaSuperActivation(model_mamba,torch.tensor(test_data).to(device))
+        # forward-scan stack only; findMambaSuperActivation only accepts a Mamba/MambaClassifier
+        magnitude, index = findMambaSuperActivation(model_mamba.mamba,torch.tensor(test_data).to(device))
         # super activation returns the entire mamba network parameters, but the classifier does not use the out_proj layer
         # so we drop it
         magnitude = magnitude[:-1]
@@ -1059,7 +1172,7 @@ def main():
         # === Validation ===
         print("\nMLP Validation")
         MLPInference = timer()
-        _eval_loader = test_loader if (testSet != orbitType) else val_loader
+        _eval_loader = test_loader if evalOnTest else val_loader
         eval_epoch(model_mlp, _eval_loader, device)
         MLPInference.tocStr("MLP Inference Time")
 
