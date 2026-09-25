@@ -107,7 +107,9 @@ def _config(stem: str, relpath: str) -> dict:
     }
 
 
-def load(pattern: str) -> pd.DataFrame:
+def load(pattern: str, rename_models: dict | None = None) -> pd.DataFrame:
+    """rename_models maps log model names onto this script's (used by the whole-trajectory
+    aggregator, classification/aggregateManuscriptTotal.py) before the model order is fixed."""
     paths = sorted(Path(".").glob(pattern))
     if not paths:
         raise SystemExit(f"no CSVs matched {pattern!r} -- run the sweep's parse step first")
@@ -130,6 +132,8 @@ def load(pattern: str) -> pd.DataFrame:
     # calls the column "model", the comparison CSV "Model".
     for col in ("model", "Model"):
         if col in out.columns:
+            if rename_models:
+                out[col] = out[col].replace(rename_models)
             out[col] = pd.Categorical(out[col], categories=model_order(out[col].unique()),
                                        ordered=True)
     return out
@@ -198,7 +202,9 @@ RPF1 = (("macro_recall", r"\textbf{R}"),
 
 def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
                 decimals: int = 2, use_color: bool = True,
-                color_lo: float = 0.25, color_hi: float = 0.75) -> str | None:
+                color_lo: float = 0.25, color_hi: float = 0.75,
+                approaches: dict | None = None, what: str | None = None,
+                label: str | None = None) -> str | None:
     """One table per orbit group: Joint vs Cascade macro R/P/F1 across every propagation window.
 
     train == test gives the in-distribution table; train != test gives the out-of-distribution
@@ -208,14 +214,22 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     blocks per time domain, bold on the column max, cell colour on the value. Cells are the MEAN
     over seeds with no +/-: 18 coloured columns with error terms is unreadable, and the per-seed
     spread is in eval_long.csv.
+
+    approaches/what/label let the whole-trajectory aggregator (classification/
+    aggregateManuscriptTotal.py) reuse this layout with its single approach; the defaults are
+    this script's Joint/Cascade table.
     """
+    approaches = approaches or APPROACH_LABEL
+    what = what or ("Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class "
+                    "model and the end-to-end cascade")
+    label = label or f"{arm_slug(train, test)}_{feat}_jc"
     d = ev[(ev.train == train) & (ev.test == test) & (ev.feat == feat)
-           & ev.eval_stage.isin(APPROACH_LABEL)]
+           & ev.eval_stage.isin(approaches)]
     if d.empty:
         return None
     props = sorted(d.propMin.unique())
     # Column order must match the header groups built below: approach outer, time inner, metric last.
-    blocks = [(st, pm) for st in APPROACH_LABEL for pm in props]
+    blocks = [(st, pm) for st in approaches for pm in props]
 
     piv = (d.groupby(["model", "eval_stage", "propMin"], observed=True)[[m for m, _ in RPF1]]
              .mean().reset_index())
@@ -234,8 +248,8 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     per_approach = len(props) * len(RPF1)
 
     top, tcm, mid, mcm, c = [], [], [], [], 2
-    for st in APPROACH_LABEL:
-        top.append(f"\\multicolumn{{{per_approach}}}{{c}}{{\\textbf{{{APPROACH_LABEL[st]}}}}}")
+    for st in approaches:
+        top.append(f"\\multicolumn{{{per_approach}}}{{c}}{{\\textbf{{{approaches[st]}}}}}")
         tcm.append(f"\\cmidrule(lr){{{c}-{c + per_approach - 1}}}")
         c += per_approach
     c = 2
@@ -266,13 +280,12 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
         f"\\textbf{{Model}} & {hdr} \\\\\n\\midrule\n"
         + "\n".join(rows) +
         "\n\\bottomrule\n\\end{tabular}%\n}\n"
-        f"\\caption{{Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class "
-        f"model and the end-to-end cascade, {_arm_phrase(train, test)}, {feat_label(feat)} "
+        f"\\caption{{{what}, {_arm_phrase(train, test)}, {feat_label(feat)} "
         f"features, "
         f"at {'/'.join(str(p) for p in props)} minutes. Mean over {seeds} seeds; per-seed spread in "
         f"eval\\_long.csv. Bold = best per approach/time/metric. Cell colour: red\\,=\\,low, "
         f"green\\,=\\,high.}}\n"
-        f"\\label{{tab:{arm_slug(train, test)}_{feat}_jc}}\n\\end{{table}}\n"
+        f"\\label{{tab:{label}}}\n\\end{{table}}\n"
     )
 
 
