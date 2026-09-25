@@ -1,0 +1,952 @@
+Processing datasets for leo with 30 minutes and 1500 random systems.
+GPU is available
+Training data location: /home/hunter/git/GMAT-Thrust-Data/data/seqClassification/leo/30min-1500
+Test data location: /home/hunter/git/GMAT-Thrust-Data/data/seqClassification/leo/30min-1500
+Standardize: per-channel train mean range [-241.1, 0.2376], std range [3.843, 4136] -> all channels z-scored
+train_data (4200, 30, 6)  val_data (900, 30, 6)  test_data (900, 30, 6)
+
+Entering Decision Trees (LightGBM) Training Loop
+
+	Elapsed time is 0.5666 seconds.
+
+==========================================================================================
+Total parameters: NaN
+Total memory (bytes): 436726
+Total memory (MB): 0.41649436950683594
+==========================================================================================
+
+Decision Trees (LightGBM) Validation
+Validation Loss: 1.3870, Validation Accuracy: 25.67%
+
+Per-Class Validation Accuracy:
+  No Thrust: 29.78% (67/225)
+  Chemical: 31.56% (71/225)
+  Electric: 24.89% (56/225)
+  Impulsive: 16.44% (37/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.2538    0.2978    0.2740       225
+    Chemical     0.2610    0.3156    0.2857       225
+    Electric     0.2523    0.2489    0.2506       225
+   Impulsive     0.2606    0.1644    0.2016       225
+
+    accuracy                         0.2567       900
+   macro avg     0.2569    0.2567    0.2530       900
+weighted avg     0.2569    0.2567    0.2530       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust           67          67          56           35
+T_Chemical            65          71          53           36
+T_Electric            68          67          56           34
+T_Impulsive           64          67          57           37
+
+Decision Trees (LightGBM) Inference Time	Elapsed time is 0.0254 seconds.
+
+Entering MiniRocket Training Loop
+
+	Elapsed time is 22.7016 seconds.
+
+==========================================================================================
+Total parameters: 9996
+Total memory (bytes): 609115
+Total memory (MB): 0.5809
+==========================================================================================
+
+MiniRocket Validation
+Validation Loss: NaN, Validation Accuracy: 24.56%
+
+Per-Class Validation Accuracy:
+  No Thrust: 19.11% (43/225)
+  Chemical: 45.33% (102/225)
+  Electric: 15.11% (34/225)
+  Impulsive: 18.67% (42/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.2590    0.1911    0.2199       225
+    Chemical     0.2519    0.4533    0.3238       225
+    Electric     0.2267    0.1511    0.1813       225
+   Impulsive     0.2346    0.1867    0.2079       225
+
+    accuracy                         0.2456       900
+   macro avg     0.2430    0.2456    0.2333       900
+weighted avg     0.2430    0.2456    0.2333       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust           43         101          35           46
+T_Chemical            37         102          43           43
+T_Electric            42         101          34           48
+T_Impulsive           44         101          38           42
+
+MiniRocket Inference Time	Elapsed time is 1.5017 seconds.
+
+Entering LSTM Training Loop
+Epoch [1/100], Training Loss: 1.3891
+Validation Loss: 1.3866, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [2/100], Training Loss: 1.3876
+Validation Loss: 1.3869, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [3/100], Training Loss: 1.3881
+Validation Loss: 1.3861, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [4/100], Training Loss: 1.3876
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 62.22% (140/225)
+  Chemical: 5.78% (13/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 32.00% (72/225)
+Epoch [5/100], Training Loss: 1.3876
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 11.56% (26/225)
+  Chemical: 0.44% (1/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 88.00% (198/225)
+Epoch [6/100], Training Loss: 1.3873
+Validation Loss: 1.3867, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 98.22% (221/225)
+  Electric: 1.78% (4/225)
+  Impulsive: 0.00% (0/225)
+Epoch [7/100], Training Loss: 1.3867
+Validation Loss: 1.3861, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [8/100], Training Loss: 1.3871
+Validation Loss: 1.3862, Validation Accuracy: 24.89%
+
+Per-Class Validation Accuracy:
+  No Thrust: 79.11% (178/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 20.44% (46/225)
+Epoch [9/100], Training Loss: 1.3871
+Validation Loss: 1.3862, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [10/100], Training Loss: 1.3868
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [11/100], Training Loss: 1.3867
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [12/100], Training Loss: 1.3867
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 31.56% (71/225)
+  Chemical: 0.00% (0/225)
+  Electric: 3.11% (7/225)
+  Impulsive: 65.33% (147/225)
+Epoch [13/100], Training Loss: 1.3867
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 22.22% (50/225)
+  Chemical: 26.22% (59/225)
+  Electric: 51.56% (116/225)
+  Impulsive: 0.00% (0/225)
+Epoch [14/100], Training Loss: 1.3867
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [15/100], Training Loss: 1.3867
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [16/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [17/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Early stopping triggered.
+
+	Elapsed time is 31.5352 seconds.
+
+==========================================================================================
+Total parameters: 28660
+Total memory (bytes): 229280
+Total memory (MB): 0.218658447265625
+==========================================================================================
+
+LSTM Validation
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.0000    0.0000    0.0000       225
+    Chemical     0.0000    0.0000    0.0000       225
+    Electric     0.0000    0.0000    0.0000       225
+   Impulsive     0.2500    1.0000    0.4000       225
+
+    accuracy                         0.2500       900
+   macro avg     0.0625    0.2500    0.1000       900
+weighted avg     0.0625    0.2500    0.1000       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust            0           0           0          225
+T_Chemical             0           0           0          225
+T_Electric             0           0           0          225
+T_Impulsive            0           0           0          225
+
+LSTM Inference Time	Elapsed time is 0.2121 seconds.
+
+Entering Mamba Training Loop
+Epoch [1/100], Training Loss: 1.3886
+Validation Loss: 1.3869, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 5.33% (12/225)
+  Chemical: 36.44% (82/225)
+  Electric: 12.44% (28/225)
+  Impulsive: 45.78% (103/225)
+Epoch [2/100], Training Loss: 1.3876
+Validation Loss: 1.3866, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.89% (2/225)
+  Chemical: 30.22% (68/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 68.89% (155/225)
+Epoch [3/100], Training Loss: 1.3871
+Validation Loss: 1.3865, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 1.78% (4/225)
+  Chemical: 39.56% (89/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 58.67% (132/225)
+Epoch [4/100], Training Loss: 1.3871
+Validation Loss: 1.3866, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 23.11% (52/225)
+  Electric: 0.89% (2/225)
+  Impulsive: 76.00% (171/225)
+Epoch [5/100], Training Loss: 1.3869
+Validation Loss: 1.3865, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 38.22% (86/225)
+  Electric: 10.22% (23/225)
+  Impulsive: 51.56% (116/225)
+Epoch [6/100], Training Loss: 1.3870
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 53.78% (121/225)
+  Electric: 23.56% (53/225)
+  Impulsive: 22.67% (51/225)
+Epoch [7/100], Training Loss: 1.3868
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 58.67% (132/225)
+  Electric: 15.56% (35/225)
+  Impulsive: 25.78% (58/225)
+Epoch [8/100], Training Loss: 1.3868
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 48.00% (108/225)
+  Electric: 20.00% (45/225)
+  Impulsive: 32.00% (72/225)
+Epoch [9/100], Training Loss: 1.3868
+Validation Loss: 1.3863, Validation Accuracy: 25.11%
+
+Per-Class Validation Accuracy:
+  No Thrust: 22.67% (51/225)
+  Chemical: 39.56% (89/225)
+  Electric: 32.89% (74/225)
+  Impulsive: 5.33% (12/225)
+Epoch [10/100], Training Loss: 1.3867
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 1.33% (3/225)
+  Chemical: 28.89% (65/225)
+  Electric: 8.00% (18/225)
+  Impulsive: 61.78% (139/225)
+Epoch [11/100], Training Loss: 1.3867
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 9.78% (22/225)
+  Electric: 43.11% (97/225)
+  Impulsive: 47.11% (106/225)
+Epoch [12/100], Training Loss: 1.3867
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 4.89% (11/225)
+  Chemical: 60.44% (136/225)
+  Electric: 31.11% (70/225)
+  Impulsive: 3.56% (8/225)
+Epoch [13/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.11%
+
+Per-Class Validation Accuracy:
+  No Thrust: 8.44% (19/225)
+  Chemical: 40.44% (91/225)
+  Electric: 36.00% (81/225)
+  Impulsive: 15.56% (35/225)
+Epoch [14/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.44% (1/225)
+  Chemical: 35.56% (80/225)
+  Electric: 6.67% (15/225)
+  Impulsive: 57.33% (129/225)
+Epoch [15/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.44% (1/225)
+  Chemical: 64.89% (146/225)
+  Electric: 13.78% (31/225)
+  Impulsive: 20.89% (47/225)
+Epoch [16/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 12.44% (28/225)
+  Chemical: 27.11% (61/225)
+  Electric: 3.11% (7/225)
+  Impulsive: 57.33% (129/225)
+Epoch [17/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 24.89%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.44% (1/225)
+  Chemical: 34.22% (77/225)
+  Electric: 20.00% (45/225)
+  Impulsive: 44.89% (101/225)
+Epoch [18/100], Training Loss: 1.3865
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.89% (2/225)
+  Chemical: 48.89% (110/225)
+  Electric: 36.00% (81/225)
+  Impulsive: 14.22% (32/225)
+Epoch [19/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 25.11%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 38.67% (87/225)
+  Electric: 39.56% (89/225)
+  Impulsive: 22.22% (50/225)
+Epoch [20/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.89% (2/225)
+  Chemical: 40.44% (91/225)
+  Electric: 36.89% (83/225)
+  Impulsive: 21.78% (49/225)
+Epoch [21/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 1.33% (3/225)
+  Chemical: 44.00% (99/225)
+  Electric: 20.89% (47/225)
+  Impulsive: 33.78% (76/225)
+Epoch [22/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 29.33% (66/225)
+  Electric: 24.44% (55/225)
+  Impulsive: 46.22% (104/225)
+Epoch [23/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 24.89%
+
+Per-Class Validation Accuracy:
+  No Thrust: 4.44% (10/225)
+  Chemical: 47.11% (106/225)
+  Electric: 3.56% (8/225)
+  Impulsive: 44.44% (100/225)
+Epoch [24/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 24.89%
+
+Per-Class Validation Accuracy:
+  No Thrust: 1.78% (4/225)
+  Chemical: 40.89% (92/225)
+  Electric: 27.56% (62/225)
+  Impulsive: 29.33% (66/225)
+Epoch [25/100], Training Loss: 1.3864
+Validation Loss: 1.3863, Validation Accuracy: 25.11%
+
+Per-Class Validation Accuracy:
+  No Thrust: 2.22% (5/225)
+  Chemical: 39.11% (88/225)
+  Electric: 26.67% (60/225)
+  Impulsive: 32.44% (73/225)
+Epoch [26/100], Training Loss: 1.3863
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 1.33% (3/225)
+  Chemical: 49.33% (111/225)
+  Electric: 22.67% (51/225)
+  Impulsive: 26.67% (60/225)
+Early stopping triggered.
+
+	Elapsed time is 96.3202 seconds.
+
+==========================================================================================
+Total parameters: 12208
+Total memory (bytes): 97664
+Total memory (MB): 0.0931396484375
+==========================================================================================
+
+Mamba Validation
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 3.56% (8/225)
+  Chemical: 54.22% (122/225)
+  Electric: 20.00% (45/225)
+  Impulsive: 22.22% (50/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.2500    0.0356    0.0623       225
+    Chemical     0.2500    0.5422    0.3422       225
+    Electric     0.2500    0.2000    0.2222       225
+   Impulsive     0.2500    0.2222    0.2353       225
+
+    accuracy                         0.2500       900
+   macro avg     0.2500    0.2500    0.2155       900
+weighted avg     0.2500    0.2500    0.2155       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust            8         122          45           50
+T_Chemical             8         122          45           50
+T_Electric             8         122          45           50
+T_Impulsive            8         122          45           50
+
+Mamba Inference Time	Elapsed time is 0.2730 seconds.
+
+Entering Transformer Training Loop
+Epoch [1/100], Training Loss: 1.4217
+Validation Loss: 1.3898, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 22.22% (50/225)
+  Chemical: 55.11% (124/225)
+  Electric: 5.78% (13/225)
+  Impulsive: 16.89% (38/225)
+Epoch [2/100], Training Loss: 1.4019
+Validation Loss: 1.3977, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 6.67% (15/225)
+  Electric: 20.44% (46/225)
+  Impulsive: 72.89% (164/225)
+Epoch [3/100], Training Loss: 1.4008
+Validation Loss: 1.3891, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 3.56% (8/225)
+  Chemical: 0.00% (0/225)
+  Electric: 77.33% (174/225)
+  Impulsive: 19.11% (43/225)
+Epoch [4/100], Training Loss: 1.3955
+Validation Loss: 1.3867, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 89.78% (202/225)
+  Chemical: 3.11% (7/225)
+  Electric: 2.67% (6/225)
+  Impulsive: 4.44% (10/225)
+Epoch [5/100], Training Loss: 1.3930
+Validation Loss: 1.3871, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [6/100], Training Loss: 1.3928
+Validation Loss: 1.3880, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [7/100], Training Loss: 1.3918
+Validation Loss: 1.3910, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [8/100], Training Loss: 1.3905
+Validation Loss: 1.3870, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [9/100], Training Loss: 1.3898
+Validation Loss: 1.3892, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [10/100], Training Loss: 1.3904
+Validation Loss: 1.3927, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [11/100], Training Loss: 1.3890
+Validation Loss: 1.3875, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 54.22% (122/225)
+  Electric: 45.78% (103/225)
+  Impulsive: 0.00% (0/225)
+Epoch [12/100], Training Loss: 1.3887
+Validation Loss: 1.3871, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [13/100], Training Loss: 1.3883
+Validation Loss: 1.3870, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [14/100], Training Loss: 1.3887
+Validation Loss: 1.3880, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Early stopping triggered.
+
+	Elapsed time is 19.4227 seconds.
+
+==========================================================================================
+Total parameters: 213092
+Total memory (bytes): 1704736
+Total memory (MB): 1.625762939453125
+==========================================================================================
+
+Transformer Validation
+Validation Loss: 1.3879, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.0000    0.0000    0.0000       225
+    Chemical     0.0000    0.0000    0.0000       225
+    Electric     0.2500    1.0000    0.4000       225
+   Impulsive     0.0000    0.0000    0.0000       225
+
+    accuracy                         0.2500       900
+   macro avg     0.0625    0.2500    0.1000       900
+weighted avg     0.0625    0.2500    0.1000       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust            0           0         225            0
+T_Chemical             0           0         225            0
+T_Electric             0           0         225            0
+T_Impulsive            0           0         225            0
+
+Transformer Inference Time	Elapsed time is 0.1232 seconds.
+
+Entering 1D-CNN (InceptionTime) Training Loop
+Epoch [1/100], Training Loss: 1.4211
+Validation Loss: 1.3967, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 86.22% (194/225)
+  Electric: 3.11% (7/225)
+  Impulsive: 10.67% (24/225)
+Epoch [2/100], Training Loss: 1.4032
+Validation Loss: 1.4010, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 71.11% (160/225)
+  Chemical: 28.89% (65/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [3/100], Training Loss: 1.3981
+Validation Loss: 1.3943, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 15.11% (34/225)
+  Electric: 84.89% (191/225)
+  Impulsive: 0.00% (0/225)
+Epoch [4/100], Training Loss: 1.3988
+Validation Loss: 1.3889, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [5/100], Training Loss: 1.3936
+Validation Loss: 1.3957, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [6/100], Training Loss: 1.3946
+Validation Loss: 1.3942, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [7/100], Training Loss: 1.3918
+Validation Loss: 1.3895, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 91.11% (205/225)
+  Impulsive: 8.89% (20/225)
+Epoch [8/100], Training Loss: 1.3915
+Validation Loss: 1.3961, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [9/100], Training Loss: 1.3899
+Validation Loss: 1.3922, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [10/100], Training Loss: 1.3900
+Validation Loss: 1.3897, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [11/100], Training Loss: 1.3879
+Validation Loss: 1.3877, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [12/100], Training Loss: 1.3888
+Validation Loss: 1.3862, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 29.33% (66/225)
+  Chemical: 70.67% (159/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [13/100], Training Loss: 1.3885
+Validation Loss: 1.3865, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [14/100], Training Loss: 1.3876
+Validation Loss: 1.3873, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [15/100], Training Loss: 1.3879
+Validation Loss: 1.3902, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [16/100], Training Loss: 1.3889
+Validation Loss: 1.3866, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [17/100], Training Loss: 1.3885
+Validation Loss: 1.3887, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [18/100], Training Loss: 1.3888
+Validation Loss: 1.3875, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 100.00% (225/225)
+  Impulsive: 0.00% (0/225)
+Epoch [19/100], Training Loss: 1.3873
+Validation Loss: 1.3871, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [20/100], Training Loss: 1.3874
+Validation Loss: 1.3861, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [21/100], Training Loss: 1.3871
+Validation Loss: 1.3868, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [22/100], Training Loss: 1.3872
+Validation Loss: 1.3872, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 100.00% (225/225)
+Epoch [23/100], Training Loss: 1.3878
+Validation Loss: 1.3862, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 50.67% (114/225)
+  Chemical: 0.00% (0/225)
+  Electric: 49.33% (111/225)
+  Impulsive: 0.00% (0/225)
+Epoch [24/100], Training Loss: 1.3874
+Validation Loss: 1.3866, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 3.11% (7/225)
+  Electric: 96.89% (218/225)
+  Impulsive: 0.00% (0/225)
+Epoch [25/100], Training Loss: 1.3870
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 2.67% (6/225)
+  Chemical: 0.00% (0/225)
+  Electric: 97.33% (219/225)
+  Impulsive: 0.00% (0/225)
+Epoch [26/100], Training Loss: 1.3870
+Validation Loss: 1.3862, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 94.22% (212/225)
+  Chemical: 5.78% (13/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [27/100], Training Loss: 1.3871
+Validation Loss: 1.3864, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 10.22% (23/225)
+  Electric: 31.11% (70/225)
+  Impulsive: 58.67% (132/225)
+Epoch [28/100], Training Loss: 1.3869
+Validation Loss: 1.3865, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 100.00% (225/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [29/100], Training Loss: 1.3870
+Validation Loss: 1.3862, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 100.00% (225/225)
+  Chemical: 0.00% (0/225)
+  Electric: 0.00% (0/225)
+  Impulsive: 0.00% (0/225)
+Epoch [30/100], Training Loss: 1.3871
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 12.00% (27/225)
+  Impulsive: 88.00% (198/225)
+Early stopping triggered.
+
+	Elapsed time is 225.8331 seconds.
+
+==========================================================================================
+Total parameters: 472708
+Total memory (bytes): 3781664
+Total memory (MB): 3.606475830078125
+==========================================================================================
+
+1D-CNN (InceptionTime) Validation
+Validation Loss: 1.3863, Validation Accuracy: 25.00%
+
+Per-Class Validation Accuracy:
+  No Thrust: 0.00% (0/225)
+  Chemical: 0.00% (0/225)
+  Electric: 12.89% (29/225)
+  Impulsive: 87.11% (196/225)
+
+Classification Report:
+              precision    recall  f1-score   support
+
+   No Thrust     0.0000    0.0000    0.0000       225
+    Chemical     0.0000    0.0000    0.0000       225
+    Electric     0.2500    0.1289    0.1701       225
+   Impulsive     0.2500    0.8711    0.3885       225
+
+    accuracy                         0.2500       900
+   macro avg     0.1250    0.2500    0.1396       900
+weighted avg     0.1250    0.2500    0.1396       900
+
+
+Confusion Matrix (rows = true, cols = predicted):
+             P_No Thrust  P_Chemical  P_Electric  P_Impulsive
+T_No Thrust            0           0          29          196
+T_Chemical             0           0          29          196
+T_Electric             0           0          29          196
+T_Impulsive            0           0          29          196
+
+1D-CNN (InceptionTime) Inference Time	Elapsed time is 1.0127 seconds.

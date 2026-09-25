@@ -1,0 +1,18 @@
+\begin{table}
+\caption{Feature-set ablation, in-distribution whole-trajectory macro f1 (30 min), mean $\pm$ std over 3 seeds.}
+\label{tab:total_feat_f1}
+\begin{tabular}{llllllllll}
+\toprule
+train & \multicolumn{3}{r}{geo} & \multicolumn{3}{r}{leo} & \multicolumn{3}{r}{meo} \\
+feat & ECI & OE + Energy & OE + Acceleration Residual & ECI & OE + Energy & OE + Acceleration Residual & ECI & OE + Energy & OE + Acceleration Residual \\
+model &  &  &  &  &  &  &  &  &  \\
+\midrule
+LightGBM & 0.249 $\pm$ 0.005 & 0.696 $\pm$ 0.003 & 0.994 $\pm$ 0.003 & 0.251 $\pm$ 0.002 & 0.632 $\pm$ 0.018 & 0.931 $\pm$ 0.003 & 0.249 $\pm$ 0.002 & 0.391 $\pm$ 0.012 & 0.990 $\pm$ 0.004 \\
+MiniRocket & 0.499 $\pm$ 0.068 & 0.997 $\pm$ 0.002 & 0.997 $\pm$ 0.002 & 0.243 $\pm$ 0.008 & 0.925 $\pm$ 0.008 & 0.942 $\pm$ 0.010 & 0.268 $\pm$ 0.009 & 0.995 $\pm$ 0.003 & 0.996 $\pm$ 0.003 \\
+CNN & 0.167 $\pm$ 0.041 & 0.989 $\pm$ 0.008 & 0.996 $\pm$ 0.003 & 0.155 $\pm$ 0.065 & 0.932 $\pm$ 0.020 & 0.962 $\pm$ 0.005 & 0.173 $\pm$ 0.011 & 0.901 $\pm$ 0.013 & 0.993 $\pm$ 0.003 \\
+LSTM & 0.120 $\pm$ 0.035 & 0.915 $\pm$ 0.136 & 0.996 $\pm$ 0.002 & 0.119 $\pm$ 0.034 & 0.813 $\pm$ 0.122 & 0.956 $\pm$ 0.001 & 0.120 $\pm$ 0.034 & 0.434 $\pm$ 0.302 & 0.994 $\pm$ 0.003 \\
+MAMBA & 0.237 $\pm$ 0.012 & 0.721 $\pm$ 0.004 & 0.993 $\pm$ 0.002 & 0.227 $\pm$ 0.012 & 0.586 $\pm$ 0.003 & 0.919 $\pm$ 0.019 & 0.238 $\pm$ 0.009 & 0.508 $\pm$ 0.043 & 0.987 $\pm$ 0.002 \\
+TRANSFORMER & 0.100 $\pm$ 0.000 & 0.819 $\pm$ 0.036 & 0.997 $\pm$ 0.002 & 0.100 $\pm$ 0.000 & 0.934 $\pm$ 0.015 & 0.949 $\pm$ 0.005 & 0.100 $\pm$ 0.000 & 0.723 $\pm$ 0.022 & 0.997 $\pm$ 0.002 \\
+\bottomrule
+\end{tabular}
+\end{table}

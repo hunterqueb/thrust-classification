@@ -1,0 +1,27 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+ & \multicolumn{9}{c}{\textbf{Whole-trajectory}} \\
+\cmidrule(lr){2-10}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} & \multicolumn{3}{c}{\textbf{30 Minute}} & \multicolumn{3}{c}{\textbf{100 Minute}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{LightGBM} & \cellcolor[HTML]{FFC044}0.45 & \cellcolor[HTML]{FFBE45}0.45 & \cellcolor[HTML]{FFB947}0.44 & \cellcolor[HTML]{FFB14B}0.42 & \cellcolor[HTML]{FFAE4C}0.41 & \cellcolor[HTML]{FFA650}0.39 & \cellcolor[HTML]{D5D345}0.56 & \cellcolor[HTML]{E3D342}0.54 & \cellcolor[HTML]{E7D341}0.53 \\
+\textbf{MiniRocket} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} & \cellcolor[HTML]{51CF66}\textbf{1.00} \\
+\textbf{CNN} & \cellcolor[HTML]{51CF66}0.93 & \cellcolor[HTML]{51CF66}0.93 & \cellcolor[HTML]{51CF66}0.93 & \cellcolor[HTML]{51CF66}0.90 & \cellcolor[HTML]{51CF66}0.90 & \cellcolor[HTML]{51CF66}0.90 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 & \cellcolor[HTML]{51CF66}0.96 \\
+\textbf{LSTM} & \cellcolor[HTML]{5BCF64}0.74 & \cellcolor[HTML]{5BCF64}0.74 & \cellcolor[HTML]{5DCF63}0.73 & \cellcolor[HTML]{FFC343}0.46 & \cellcolor[HTML]{FFC243}0.46 & \cellcolor[HTML]{FFB848}0.43 & \cellcolor[HTML]{FF8E5B}0.33 & \cellcolor[HTML]{FF885E}0.32 & \cellcolor[HTML]{FF7F62}0.30 \\
+\textbf{MAMBA} & \cellcolor[HTML]{9FD153}0.64 & \cellcolor[HTML]{A1D152}0.63 & \cellcolor[HTML]{A5D151}0.63 & \cellcolor[HTML]{ECD340}0.53 & \cellcolor[HTML]{F7D43D}0.51 & \cellcolor[HTML]{F9D43C}0.51 & \cellcolor[HTML]{D2D346}0.56 & \cellcolor[HTML]{E3D342}0.54 & \cellcolor[HTML]{DFD343}0.55 \\
+\textbf{TRANSFORMER} & \cellcolor[HTML]{51CF66}0.89 & \cellcolor[HTML]{51CF66}0.90 & \cellcolor[HTML]{51CF66}0.89 & \cellcolor[HTML]{56CF65}0.74 & \cellcolor[HTML]{5FCF63}0.73 & \cellcolor[HTML]{64D061}0.72 & \cellcolor[HTML]{6DD05F}0.71 & \cellcolor[HTML]{66D061}0.72 & \cellcolor[HTML]{75D05D}0.70 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Whole-trajectory macro Recall (R), Precision (P), and F1, MEO train and test, OE + Energy features, at 10/30/100 minutes. Mean over 3 seeds; per-seed spread in eval\_long.csv. Bold = best per approach/time/metric. Cell colour: red\,=\,low, green\,=\,high.}
+\label{tab:total_meo_phys}
+\end{table}
