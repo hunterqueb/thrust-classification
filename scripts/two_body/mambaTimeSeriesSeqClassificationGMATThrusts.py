@@ -25,6 +25,8 @@
 #   --smooth-max-gap N   post-hoc: close interior NoThrust gaps <= N between thrust predictions
 #                        before event-level reporting. Measured on leo/30min: no effect on LSTM/CNN,
 #                        ~0.9pp Impulsive event recall on Transformer at N=3 (sweepSmoothGap.py).
+#   --conformal ALPHA    post-hoc: temperature scaling + per-class (Mondrian) conformal prediction
+#                        sets for neural/LightGBM/MiniRocket joint+cascade; needs --eval-test in-distribution.
 #
 # $ python scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py \
 # --systems 1500 --propMin 30 --orbit vleo --mode all
@@ -201,6 +203,16 @@ parser.add_argument("--eval-test", dest="eval_test", action="store_true",
                           "split already exists in that branch and is simply unused. Turn this on for any "
                           "table that puts in-distribution and cross-regime results side by side. Tagged "
                           "as EvalTest_ so it cannot collide with existing logs.")
+parser.add_argument("--conformal", dest="conformal_alpha", type=float, default=0.0, metavar="ALPHA",
+                     help="If > 0, after each neural, LightGBM and MiniRocket joint/cascade evaluation: fit a temperature on the "
+                          "validation split, then report class-conditional (Mondrian) conformal prediction "
+                          "sets at miscoverage ALPHA (e.g. 0.1 -> each thrust type's true frames are in the "
+                          "set >= 90%% of the time) with per-class coverage, set sizes and ECE before/after "
+                          "scaling. Post-hoc only: no other reported number changes. Calibrates on the "
+                          "validation split, so it needs a held-out eval split: --eval-test in-distribution "
+                          "(cross-orbit runs already have one, but the coverage guarantee assumes the eval "
+                          "split matches the calibration split's distribution, which cross-orbit violates -- "
+                          "the reported coverage then measures that shift). 0 (default): off.")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(use_mamba=True)
@@ -269,6 +281,7 @@ usePhysicsLoss = physicsLossWeight > 0
 smoothMaxGap = args.smooth_max_gap
 runSeed = args.seed
 evalTest = args.eval_test
+conformalAlpha = args.conformal_alpha
 if args.pca is not None and args.pca > 0:
     pca_n_components = args.pca
 else:
@@ -299,6 +312,7 @@ if runSeed is not None:
 device = getDevice()
 
 from seqData import *  # noqa: F401,F403 -- residual-ladder names, label conventions, data loading
+from conformal import calibratedProbs, printHeader, reportConformal
 
 
 strAdd = ""
@@ -1126,6 +1140,62 @@ def runCascadeEvaluation(stage1_model, stage2_model, loader, device, print_repor
 
 
 # ---------------------------------------------------------------------------
+# Uncertainty (--conformal): the model-agnostic core (temperature scaling, Mondrian conformal sets,
+# the report) is in conformal.py, shared with the whole-trajectory script. What follows is the
+# per-timestep glue: collecting [N,T,C] scores from each model family and composing cascades.
+# ---------------------------------------------------------------------------
+def _collectLogits(model, loader, device):
+    """[N,T,C] logits and the [N,T] joint labels, in loader order."""
+    model.eval()
+    logits, labels = [], []
+    with torch.no_grad():
+        for x, y_joint, _, _, _, _ in loader:
+            logits.append(model(x.to(device, torch.float64)).cpu())
+            labels.append(y_joint.long())
+    return torch.cat(logits), torch.cat(labels).numpy()
+
+
+def _stageLabels(y_joint, mode, pad_idx=-100):
+    """Joint [N,T] labels -> that mode's label view. pad_idx in y_joint marks frames a model has no
+    prediction for (e.g. the classic models' first hankel_L-1 frames) and stays pad_idx in every view."""
+    if mode == "joint":
+        return y_joint
+    y = _deriveStage1Stage2(y_joint, pad_idx)[0 if mode == "stage1" else 1]
+    return np.where(y_joint == pad_idx, pad_idx, y)
+
+
+def _calibratedProbs(z_cal, y_cal, z_eval, y_eval, mode, pad_idx=-100):
+    """conformal.calibratedProbs against this mode's own label view."""
+    return calibratedProbs(z_cal, _stageLabels(y_cal, mode, pad_idx), z_eval, _stageLabels(y_eval, mode, pad_idx),
+                           mode, pad_idx)
+
+
+def runUncertaintyReport(scores, y_cal, y_eval, alpha, name, pad_idx=-100):
+    """scores: {'joint': (z_cal, z_eval)} or {'stage1': (...), 'stage2': (...)}, each [N,T,C];
+    y_cal/y_eval: [N,T] joint labels, pad_idx where the model has no prediction. A cascade's
+    calibrated stages compose into joint probabilities P(NoThrust) = P1(no),
+    P(type) = P1(yes) * P2(type | thrust), so every model family and both forms get conformal sets
+    over the same 4 classes and compare directly."""
+    printHeader(name)
+    probs = {mode: _calibratedProbs(zc, y_cal, ze, y_eval, mode, pad_idx) for mode, (zc, ze) in scores.items()}
+    if "joint" in probs:
+        pc, pe = probs["joint"]
+    else:
+        compose = lambda p1, p2: np.concatenate([p1[..., :1], p1[..., 1:] * p2], axis=-1)
+        pc, pe = (compose(p1, p2) for p1, p2 in zip(probs["stage1"], probs["stage2"]))
+    return reportConformal(pc, y_cal, pe, y_eval, JOINT_CLASS_NAMES, alpha, pad_idx)
+
+
+def runNeuralUncertainty(models, cal_loader, eval_loader, device, alpha, name):
+    """models: {'joint': m} or {'stage1': m1, 'stage2': m2}."""
+    scores = {}
+    for mode, mdl in models.items():
+        (zc, y_cal), (ze, y_eval) = (_collectLogits(mdl, ld, device) for ld in (cal_loader, eval_loader))
+        scores[mode] = (zc, ze)
+    return runUncertaintyReport(scores, y_cal, y_eval, alpha, name)
+
+
+# ---------------------------------------------------------------------------
 # Classic ML / GBDT per-timestep baselines (LightGBM/XGBoost/CatBoost/RandomForest/ExtraTrees):
 # one row per timestep from a trailing Hankel window.
 # ---------------------------------------------------------------------------
@@ -1172,6 +1242,28 @@ def predictClassicPerTimestep(model, data, hankel_L=5):
     return preds
 
 
+def classicScoreGrid(model, data, hankel_L=5):
+    """[N,T,C] log predict_proba per timestep, for --conformal. Frames t < hankel_L-1 have no window
+    and are left 0 -- _classicUncertainty masks them out of the labels."""
+    N, T, _ = data.shape
+    assert np.array_equal(model.classes_, np.arange(len(model.classes_))), "a class was missing from training"
+    X, _, _ = buildHankelWindowRowsPerTimestep(data, np.zeros((N, T), dtype=np.int64), hankel_L, drop_masked=False)
+    P = model.predict_proba(X)
+    grid = np.zeros((N, T, P.shape[1]))
+    grid[:, hankel_L - 1:] = np.log(np.clip(P, 1e-12, None)).reshape(T - hankel_L + 1, N, -1).transpose(1, 0, 2)
+    return grid
+
+
+def _classicUncertainty(models, cal, eval_data, eval_joint, hankel_L, name, pad_idx=-100):
+    """models: {'joint': clf} or {'stage1': clf1, 'stage2': clf2}; cal: (cal_data, cal_joint)."""
+    cal_data, cal_joint = cal
+    scores = {mode: (classicScoreGrid(m, cal_data, hankel_L), classicScoreGrid(m, eval_data, hankel_L))
+              for mode, m in models.items()}
+    no_window = np.arange(eval_joint.shape[1]) < hankel_L - 1
+    mask = lambda y: np.where(no_window, pad_idx, y)
+    return runUncertaintyReport(scores, mask(cal_joint), mask(eval_joint), conformalAlpha, name, pad_idx)
+
+
 def evaluateClassicPerTimestep(model, eval_data, eval_labels, class_names, hankel_L=5, pad_idx=-100, print_report=True):
     """Masked standalone evaluation (drop_masked=True), matching validateInSequenceClassifier's
     masking behavior for the neural backbones -- a no-op filter for joint/stage1 labels (which
@@ -1183,8 +1275,9 @@ def evaluateClassicPerTimestep(model, eval_data, eval_labels, class_names, hanke
 
 def runClassicFamily(name, classifier_ctor, num_classes, mode_name, class_names,
                       train_data, train_labels, eval_data, eval_labels,
-                      hankel_L, pad_idx, size_fn, smooth_max_gap=0):
-    """classifier_ctor: callable(num_classes) -> unfit sklearn-API classifier instance."""
+                      hankel_L, pad_idx, size_fn, smooth_max_gap=0, cal=None):
+    """classifier_ctor: callable(num_classes) -> unfit sklearn-API classifier instance.
+    cal: (cal_data, cal_joint) -> also run the --conformal report (joint mode only)."""
     print(f"\nEntering {name} ({mode_name}) Training Loop")
     X_train, y_train, _ = buildHankelWindowRowsPerTimestep(train_data, train_labels, hankel_L, pad_idx=pad_idx, drop_masked=True)
     clf = classifier_ctor(num_classes)
@@ -1204,11 +1297,13 @@ def runClassicFamily(name, classifier_ctor, num_classes, mode_name, class_names,
                                         plot_name=name,
                                         plot_save_path=os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_joint_{logStem}.png"),
                                         mode_label="Joint", valid_from=hankel_L - 1)
+        if cal is not None:
+            _classicUncertainty({"joint": clf}, cal, eval_data, eval_labels, hankel_L, f"{name} Joint", pad_idx)
     return clf
 
 
 def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data, eval_joint,
-                       hankel_L, pad_idx, size_fn, smooth_max_gap=0):
+                       hankel_L, pad_idx, size_fn, smooth_max_gap=0, cal=None):
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
     eval_stage1, eval_stage2 = _deriveStage1Stage2(eval_joint, pad_idx)
 
@@ -1242,6 +1337,9 @@ def runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data,
                                plot_save_path=os.path.join(plotLoc, f"seqpred_{name.replace(' ', '_')}_cascade_{logStem}.png"),
                                valid_from=hankel_L - 1, smooth_max_gap=smooth_max_gap)
     tInf.tocStr(f"{name} Cascade Inference Time")
+    if cal is not None:
+        _classicUncertainty({"stage1": clf1, "stage2": clf2}, cal, eval_data, eval_joint, hankel_L,
+                            f"{name} Cascade", pad_idx)
     return clf1, clf2
 
 
@@ -1249,14 +1347,14 @@ def runClassicMLModes(name, classifier_ctor, size_fn,
                        train_data, train_joint, train_stage1, train_stage2,
                        eval_data, eval_joint, eval_stage1, eval_stage2,
                        hankel_L, pad_idx,
-                       run_joint, run_cascade, run_stage1_solo, run_stage2_solo, smooth_max_gap=0):
+                       run_joint, run_cascade, run_stage1_solo, run_stage2_solo, smooth_max_gap=0, cal=None):
     if run_joint:
         runClassicFamily(name, classifier_ctor, 4, "joint", JOINT_CLASS_NAMES,
                           train_data, train_joint, eval_data, eval_joint, hankel_L, pad_idx, size_fn,
-                          smooth_max_gap=smooth_max_gap)
+                          smooth_max_gap=smooth_max_gap, cal=cal)
     if run_cascade:
         runClassicCascade(name, classifier_ctor, train_data, train_joint, eval_data, eval_joint,
-                           hankel_L, pad_idx, size_fn, smooth_max_gap=smooth_max_gap)
+                           hankel_L, pad_idx, size_fn, smooth_max_gap=smooth_max_gap, cal=cal)
     if run_stage1_solo:
         runClassicFamily(name, classifier_ctor, 2, "stage1", STAGE1_CLASS_NAMES,
                           train_data, train_stage1, eval_data, eval_stage1, hankel_L, pad_idx, size_fn)
@@ -1537,20 +1635,21 @@ def _ridgeFit(tf, X, n_feat, targets, mask=None, alpha=1.0):
 
 
 def _ridgePredict(tf, X, n_feat, Ws, mask=None):
-    """One streamed pass, every head predicted from it -> list of flat label arrays, one per W.
+    """One streamed pass, every head predicted from it -> list of flat [M,C] ridge scores, one per W
+    (argmax for labels; --conformal uses the scores themselves).
     Batched for the same reason _ridgeFit batches heads: the transform, not the matmul, is what a
     second pass would repeat."""
     outs = [[] for _ in Ws]
     for _, F in _minirocketChunks(tf, X, n_feat, mask):
         Fb = F.astype(np.float64)
         for o, W in zip(outs, Ws):
-            o.append((Fb @ W).argmax(axis=1))
-    return [np.concatenate(o) if o else np.zeros(0, dtype=np.int64) for o in outs]
+            o.append(Fb @ W)
+    return [np.concatenate(o) if o else np.zeros((0, W.shape[1])) for o, W in zip(outs, Ws)]
 
 
 def _minirocketGrid(n, t, idx, flat):
-    """Scatter flat per-row predictions back to an [N,T] grid."""
-    grid = np.zeros((n, t), dtype=np.int64)
+    """Scatter flat per-row predictions [M] (or scores [M,C]) back to an [N,T] (or [N,T,C]) grid."""
+    grid = np.zeros((n, t) + flat.shape[1:], dtype=flat.dtype)
     grid[idx[:, 0], idx[:, 1]] = flat
     return grid
 
@@ -1570,10 +1669,12 @@ def printMiniRocketRidgeSize(tf, head):
 
 def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad_idx, num_kernels,
                               run_joint, run_cascade, run_stage1_solo, run_stage2_solo,
-                              smooth_max_gap=0):
+                              smooth_max_gap=0, cal=None):
     """One shared windowed MiniRocket transform, then a ridge head per requested mode. All heads are
     fitted, and all eval predictions made in one streamed pass, before anything is reported --
-    features are never stored, so interleaving would re-transform per report."""
+    features are never stored, so interleaving would re-transform per report.
+    cal: (cal_data, cal_joint) -> one more streamed pass over the calibration windows, then the
+    --conformal report on the ridge scores for the joint and cascade heads."""
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint, pad_idx)
     eval_stage1, _ = _deriveStage1Stage2(eval_joint, pad_idx)
     N_eval, T_eval = eval_joint.shape
@@ -1625,12 +1726,27 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
     # reports below only index into them.
     tInf = timer()
     order = [W for W in (W_joint, W_s1, W_s2) if W is not None]
-    preds = _ridgePredict(tf, X_eval, n_feat, order) if order else []
+    scores = _ridgePredict(tf, X_eval, n_feat, order) if order else []
+    preds = [sc.argmax(axis=1) for sc in scores]
     pred_joint = preds.pop(0) if W_joint is not None else None
     pred_s1 = preds.pop(0) if W_s1 is not None else None
     pred_s2 = preds.pop(0) if W_s2 is not None else None
     tInf.tocStr("MiniRocket Inference Time (all heads, one transform pass)")
     del X_train, X_eval
+
+    # --conformal: score grids for both splits. Outside the timer above so the reported inference
+    # time stays the plain label-prediction cost.
+    if cal is not None and order:
+        cal_data, cal_joint = cal
+        X_cal, idx_cal = _minirocketWindows(cal_data)
+        cal_scores = _ridgePredict(tf, X_cal, n_feat, order)
+        del X_cal
+        grids = [(_minirocketGrid(*cal_joint.shape, idx_cal, sc_c), _minirocketGrid(N_eval, T_eval, idx_eval, sc_e))
+                 for sc_c, sc_e in zip(cal_scores, scores)]
+        grid_joint = grids.pop(0) if W_joint is not None else None
+        grid_s1 = grids.pop(0) if W_s1 is not None else None
+        grid_s2 = grids.pop(0) if W_s2 is not None else None
+    del scores
 
     # --- reporting only from here on ---------------------------------------------------------
     # displaySeqLogData.py splits the log on "Entering <X> Training Loop", so each head's line
@@ -1689,6 +1805,13 @@ def runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, pad
                                    plot_save_path=os.path.join(plotLoc, f"seqpred_MiniRocket_cascade_{logStem}.png"),
                                    valid_from=0, smooth_max_gap=smooth_max_gap)
         tCasc.tocStr("MiniRocket Cascade Inference Time")
+
+    if cal is not None:
+        if run_joint:
+            runUncertaintyReport({"joint": grid_joint}, cal[1], eval_joint, conformalAlpha, "MiniRocket Joint", pad_idx)
+        if run_cascade:
+            runUncertaintyReport({"stage1": grid_s1, "stage2": grid_s2}, cal[1], eval_joint, conformalAlpha,
+                                  "MiniRocket Cascade", pad_idx)
 
 
 def main():
@@ -1750,6 +1873,14 @@ def main():
     eval_stage1, eval_stage2 = _deriveStage1Stage2(eval_joint)
     train_stage1, train_stage2 = _deriveStage1Stage2(train_joint)
     val_stage1_np, val_stage2_np = _deriveStage1Stage2(val_joint)
+
+    # Calibrating and evaluating on the same split would make the reported coverage in-sample.
+    # ponytail: val also drives early stopping, so its scores are mildly optimistic -> coverage can
+    # land slightly under target; a 4th IC-disjoint calibration split fixes that if it matters.
+    runConformal = conformalAlpha > 0 and use_test_eval
+    if conformalAlpha > 0 and not use_test_eval:
+        print("[skip] --conformal calibrates on the validation split, which is also the eval split "
+              "here; add --eval-test to report conformal sets on the held-out test split.")
 
     backbones = (["lstm"] if use_lstm else []) + (["mamba"] if use_mamba else [])
     if use_transformer:
@@ -1848,6 +1979,9 @@ def main():
                                             plot_name=backbone.upper(),
                                             plot_save_path=os.path.join(plotLoc, f"seqpred_{backbone.upper()}_joint_{logStem}.png"),
                                             mode_label="Joint")
+            if runConformal:
+                runNeuralUncertainty({"joint": model_joint}, val_loader, eval_loader, device,
+                                      conformalAlpha, f"{backbone.upper()} Joint")
 
         if run_cascade:
             print(f"\nEntering {backbone.upper()} Stage 1 (Detector) Training Loop")
@@ -1876,6 +2010,9 @@ def main():
                                   plot_save_path=os.path.join(plotLoc, f"seqpred_{backbone.upper()}_cascade_{logStem}.png"),
                                   smooth_max_gap=smoothMaxGap)
             cascadeInference.tocStr(f"{backbone.upper()} Cascade Inference Time")
+            if runConformal:
+                runNeuralUncertainty({"stage1": model_stage1, "stage2": model_stage2}, val_loader, eval_loader,
+                                      device, conformalAlpha, f"{backbone.upper()} Cascade")
 
         if run_stage1_solo:
             print(f"\nEntering {backbone.upper()} Stage 1 (Detector, standalone) Training Loop")
@@ -1914,7 +2051,7 @@ def main():
                            train_data, train_joint, train_stage1, train_stage2,
                            eval_data, eval_joint, eval_stage1, eval_stage2,
                            hankel_L, -100, run_joint, run_cascade, run_stage1_solo, run_stage2_solo,
-                           smooth_max_gap=smoothMaxGap)
+                           smooth_max_gap=smoothMaxGap, cal=(val_data, val_joint) if runConformal else None)
 
     if use_xgboost:
         from xgboost import XGBClassifier
@@ -1988,7 +2125,8 @@ def main():
             runMiniRocketPerTimestep(train_data, train_joint, eval_data, eval_joint, -100,
                                       minirocketKernels, run_joint, run_cascade,
                                       run_stage1_solo, run_stage2_solo,
-                                      smooth_max_gap=smoothMaxGap)
+                                      smooth_max_gap=smoothMaxGap,
+                                      cal=(val_data, val_joint) if runConformal else None)
 
 
 if __name__ == "__main__":

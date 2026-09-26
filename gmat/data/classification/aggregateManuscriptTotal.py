@@ -16,6 +16,9 @@ One approach here (one label per trajectory), so the in-sequence script's cascad
 (t5_cascade, cascade_vs_joint, best_cascade) have no counterpart, and t7_complexity is skipped
 because displayLogData.py does not emit Big-O. Every file and \\label is prefixed total_ so these
 can sit next to the in-sequence tables in one manuscript.
+
+total_t8_conformal_* parse the --conformal block straight from the logs (<train>/<prop>min-*/*.log),
+like the in-sequence t8, so they appear only once the sweep has run with CONFORMAL=<alpha>.
 """
 import argparse
 import sys
@@ -24,8 +27,8 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "seqClassification"))
-from aggregateManuscript import (_disp, _pivot, agg, emit, feat_label,  # noqa: E402
-                                 load, paired_delta, rpf1_table)
+from aggregateManuscript import (_disp, _pivot, agg, conformal_table, emit,  # noqa: E402
+                                 feat_label, load, load_conformal, paired_delta, rpf1_table)
 
 # The training script's "Entering <X> Training Loop" names -> the in-sequence tables' names.
 MODEL_NAME = {"Decision Trees (LightGBM)": "LightGBM", "Mamba": "MAMBA",
@@ -110,6 +113,25 @@ def main() -> None:
          out / "total_t6_perclass.tex",
          f"Per-class whole-trajectory recall and F1 for the two hardest classes, in-distribution "
          f"({hp} min).", "tab:total_perclass")
+
+    # T8 -- conformal uncertainty per train->test arm, same layout as the in-sequence t8 minus its
+    # Approach column. Parsed from the logs directly; present only for CONFORMAL=<alpha> sweeps.
+    cf = load_conformal()
+    if cf.empty:
+        print("  (skip total_t8_conformal: no conformal blocks in the logs -- sweep with CONFORMAL=0.1)")
+    else:
+        cf["model"] = cf["model"].replace(MODEL_NAME)
+        cf["approach"] = APPROACH[STAGE]
+        cf.assign(feat_label=cf["feat"].map(feat_label)).to_csv(out / "total_conformal_long.csv", index=False)
+        print(f"wrote {out / 'total_conformal_long.csv'}  ({len(cf)} rows)")
+        for train, test in sorted(set(zip(cf.train, cf.test)), key=lambda p: (p[0] != p[1], p)):
+            arm = train if train == test else f"{train}_to_{test}"
+            tex = conformal_table(cf, train, test, "phys", hp, n, approaches=(APPROACH[STAGE],),
+                                  unit="trajectories", what="Conformal whole-trajectory uncertainty",
+                                  label=f"tab:total_conformal_{arm}", long_csv="total_conformal_long.csv")
+            if tex:
+                (out / f"total_t8_conformal_{arm}.tex").write_text(tex)
+                print(f"wrote {out / f'total_t8_conformal_{arm}.tex'}")
 
     # Per train->test arm x feature set: R/P/F1 at every window, same layout as seq_*_jc.tex.
     print()

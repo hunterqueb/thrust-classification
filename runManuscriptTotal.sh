@@ -23,6 +23,12 @@
 #   DRY_RUN=1 ./runManuscriptTotal.sh | grep 'would write' | sort | uniq -d   # must be empty
 #   SEEDS=0 PROP_MINS=10 FEATS=phys ARMS="leo:leo" EXTRA="--one-pass" EXTRA_TOK="OnePass_" \
 #     SKIP_PARSE=1 ./runManuscriptTotal.sh
+#
+# Conformal uncertainty on every cell (temperature scaling + per-class conformal sets, shared with the
+# in-sequence sweep via scripts/two_body/conformal.py):
+#   CONFORMAL=0.1 ./runManuscriptTotal.sh
+# --conformal adds no strAdd token, so the stem is unchanged; instead the completion marker moves
+# to the CNN's conformal block, and every existing log without one re-runs.
 
 set -euo pipefail
 
@@ -36,6 +42,7 @@ EXTRA_TOK="${EXTRA_TOK:-}"    # MUST mirror what EXTRA adds to strAdd, e.g. "One
 PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
+CONFORMAL="${CONFORMAL:-0.1}"    # miscoverage alpha, e.g. 0.1; empty = off
 
 SCRIPT=scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py
 
@@ -52,6 +59,13 @@ COMMON=(
     --seq-data
     --save
 )
+# The CNN is the last model main() runs, and its conformal block prints after its inference time,
+# so the marker is always the last thing a complete run writes.
+MARKER="1D-CNN (InceptionTime) Inference Time"
+if [ -n "$CONFORMAL" ]; then
+    COMMON+=(--conformal "$CONFORMAL")
+    MARKER="1D-CNN (InceptionTime) Uncertainty"
+fi
 
 FAILED=""
 DONE=0
@@ -86,7 +100,7 @@ run_one() {   # train test feat propMin seed
 
     # Completion marker: the CNN is the last model main() runs, so a partial log (--save opens it
     # 'w' at startup) lacks this line and re-runs.
-    if [ -f "$log" ] && grep -q "1D-CNN (InceptionTime) Inference Time" "$log"; then
+    if [ -f "$log" ] && grep -q "$MARKER" "$log"; then
         echo "[skip] $stem"
         SKIPPED=$((SKIPPED + 1))
         return 0

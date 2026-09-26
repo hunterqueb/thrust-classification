@@ -10,6 +10,9 @@ Consumes displaySeqLogData.py's group CSVs (eval_, comparison_, and -- for the t
 inference-time / Big-O table -- complexity_manuscript.csv). Only logs whose stem ends in Seed<n> are kept, which
 is what excludes the pre-existing non-sweep logs (ResidLadder*, plain Energy_J2Energy_OE, ...)
 that --group-dir also rglob'd out of the same directories.
+
+The t8 conformal tables are the exception: they parse the --conformal block straight from the logs
+(<train>/<prop>min-*/*.log), so they appear only once the sweep has run with CONFORMAL=<alpha>.
 """
 import argparse
 import re
@@ -347,6 +350,98 @@ def _arm_phrase(train: str, test: str) -> str:
     return f"trained on {train.upper()}, tested out-of-distribution on {test.upper()}"
 
 
+# --- Conformal uncertainty (--conformal, runManuscriptInSeq.sh CONFORMAL=...) ---------------------
+# Read straight from the logs rather than via displaySeqLogData's CSVs: the block is self-contained
+# and fixed-format (scripts/two_body/conformal.py, shared by both classifiers), so a regex here is the
+# whole parser. The approach is optional: whole-trajectory logs print "<model> Uncertainty (...)".
+CONF_HDR_RE = re.compile(r"^([^\n]+?)(?: (Joint|Cascade))? Uncertainty \(temperature scaling \+ Mondrian conformal\)$"
+                         r"(.*?)(?=^\S|\Z)", re.M | re.S)
+CONF_ALPHA_RE = re.compile(r"Conformal sets at (\d+)% per-class coverage")
+CONF_ROW_RE = re.compile(r"^  (No Thrust|Chemical|Electric|Impulsive|all)\s+(?:P >= ([\d.]+)%|always)?\s*"
+                         r"(-|[\d.]+%)" + r"\s+([\d.]+)%" * 5 + r"\s*$", re.M)
+CONF_COLS = ["threshold", "precision", "coverage", "certain", "ambiguous", "abstain", "wrong"]
+CONF_CLASSES = ["No Thrust", "Chemical", "Electric", "Impulsive", "All"]
+
+
+def parse_conformal(text: str) -> list[dict]:
+    """One dict per (model, approach, class) row of every conformal block in a log; values are
+    fractions; approach is "" for a whole-trajectory block. threshold is the calibrated probability a class needs to be asserted (NaN for All,
+    or 'always'); precision is NaN when the class was never asserted alone."""
+    out = []
+    for model, approach, body in CONF_HDR_RE.findall(text):
+        target = CONF_ALPHA_RE.search(body)
+        for cls, thr, prec, *rest in CONF_ROW_RE.findall(body):
+            vals = [float(thr) if thr else float("nan"),
+                    float("nan") if prec == "-" else float(prec.rstrip("%"))] + [float(v) for v in rest]
+            out.append({"model": model, "approach": approach, "class": "All" if cls == "all" else cls,
+                        "target": int(target.group(1)) / 100 if target else float("nan"),
+                        **{c: v / 100 for c, v in zip(CONF_COLS, vals)}})
+    return out
+
+
+def load_conformal(pattern: str = "*/*min-*/*.log") -> pd.DataFrame:
+    """Same Seed<n> / OnePass filtering as load(), applied to log paths."""
+    rows = []
+    for p in sorted(Path(".").glob(pattern)):
+        if not SEED_RE.search(p.stem) or "OnePass_" in p.stem:
+            continue
+        cfg = _config(p.stem, p.as_posix())
+        rows += [{**cfg, **r} for r in parse_conformal(p.read_text(errors="replace"))]
+    return pd.DataFrame(rows)
+
+
+CONF_TABLE = {"threshold": r"\textbf{Thr}", "coverage": r"\textbf{Cov}",
+              "precision": r"\textbf{Prec}", "abstain": r"\textbf{Abst}"}
+
+
+def conformal_table(cf: pd.DataFrame, train: str, test: str, feat: str, prop: int,
+                    seeds: int, approaches=("Joint", "Cascade"), unit: str = "timesteps",
+                    what: str = "Conformal per-timestep uncertainty", label: str | None = None,
+                    long_csv: str = "conformal_long.csv") -> str | None:
+    """Model x approach rows; per class: asserted-at threshold, coverage, precision (of single-class
+    assertions) and abstention, in percent, mean over seeds -- the rpf1_table convention, with the
+    per-seed spread in the long CSV. All has no threshold (it is per class). With a single approach
+    (the whole-trajectory aggregator) the Approach level is dropped."""
+    d = cf[(cf.train == train) & (cf.test == test) & (cf.feat == feat) & (cf.propMin == prop)]
+    if d.empty:
+        return None
+    keys = ["model", "approach", "class"]
+    n = d.groupby(keys).size()
+    for k, c in n[n != seeds].items():
+        print(f"  ! conformal: {c}/{seeds} seeds for {train}->{test}/{feat}/{prop}/{'/'.join(k)}")
+    m = d.groupby(keys)[list(CONF_TABLE)].mean()
+
+    cols = [(cls, met) for cls in CONF_CLASSES for met in CONF_TABLE
+            if not (cls == "All" and met == "threshold")]
+    idx = [(mo, ap) for mo in model_order(d.model.unique()) for ap in approaches
+           if (mo, ap) in m.index.droplevel("class")]
+    fmt = lambda v, met: "--" if pd.isna(v) else f"{100 * v:.2f}" if met == "threshold" else f"{100 * v:.1f}"
+    piv = pd.DataFrame([[fmt(m.loc[(mo, ap, cls), met], met) if (mo, ap, cls) in m.index else "--"
+                         for cls, met in cols] for mo, ap in idx],
+                       index=pd.MultiIndex.from_tuples(idx, names=["Model", "Approach"]),
+                       columns=pd.MultiIndex.from_tuples([(f"\\textbf{{{c}}}", CONF_TABLE[x]) for c, x in cols]))
+    if len(approaches) == 1:
+        piv.index = piv.index.droplevel("Approach")
+    target = d["target"].dropna()
+    cov = f"{target.iloc[0]:.0%}".replace("%", r"\%") if len(target) else "the target"
+    shift = ("" if train == test else
+             " Calibration is on the training orbit, so the coverage guarantee does not hold here;"
+             " the coverage columns measure how much of it survives the regime shift.")
+    return (
+        "% Requires \\usepackage{multirow} and \\usepackage{booktabs} in LaTeX preamble.\n"
+        "\\begin{table}[t]\n\\centering\n\\setlength{\\tabcolsep}{3pt}\n\\resizebox{\\textwidth}{!}{%\n"
+        + piv.to_latex(escape=False, multicolumn_format="c", column_format="l" * piv.index.nlevels + "c" * len(cols))
+        + "}\n"
+        f"\\caption{{{what}, {_arm_phrase(train, test)}, {feat_label(feat)} "
+        f"features, {prop} min, {cov} target per-class coverage. Temperature-scaled, class-conditional "
+        f"split conformal sets. Thr: calibrated probability a class needs to be asserted; Cov: fraction "
+        f"of that class's {unit} whose set contains it; Prec: of the {unit} asserted as that class "
+        f"alone, the fraction that truly are; Abst: fraction given an empty set. Percent, mean over "
+        f"{seeds} seeds; per-seed values in {long_csv.replace('_', chr(92) + '_')}.{shift}}}\n"
+        f"\\label{{{label or f'tab:conformal_{arm_slug(train, test)}_{feat}'}}}\n\\end{{table}}\n"
+    )
+
+
 # Two-series categorical pair, Okabe-Ito. Validated with the dataviz palette checker against the
 # light chart surface: lightness band PASS, chroma floor PASS, CVD separation dE 21.9 (protan) /
 # 30.9 (tritan) PASS, normal-vision dE 31.2 PASS, contrast >= 3:1 PASS. Do not substitute
@@ -577,6 +672,21 @@ def main() -> None:
     else:
         print(f"  (skip t7_complexity: no {cx_pattern} -- re-run displaySeqLogData.py --group-dir)")
 
+    # T8 -- conformal uncertainty, one table per train->test arm at the headline window/feature set.
+    # Parsed from the logs directly; present only for runs swept with CONFORMAL=<alpha>.
+    cf = load_conformal()
+    if cf.empty:
+        print("  (skip t8_conformal: no conformal blocks in the logs -- sweep with CONFORMAL=0.1)")
+    else:
+        cf.assign(feat_label=cf["feat"].map(feat_label)).to_csv(a.out_dir / "conformal_long.csv", index=False)
+        print(f"wrote {a.out_dir / 'conformal_long.csv'}  ({len(cf)} rows)")
+        for train, test in sorted(set(zip(cf.train, cf.test)), key=lambda p: (p[0] != p[1], p)):
+            tex = conformal_table(cf, train, test, "phys", hp, a.seeds)
+            if tex:
+                out = a.out_dir / f"t8_conformal_{arm_slug(train, test)}.tex"
+                out.write_text(tex)
+                print(f"wrote {out}")
+
     # Per-orbit Joint-vs-Cascade R/P/F1 across every window -- one table per orbit group, per
     # feature arm (the arm has to be fixed within a table: approach x time x metric already fills
     # all 18 columns of the reference layout).
@@ -749,6 +859,61 @@ def _selfcheck() -> None:
     assert "PCA" not in complexity_legend([lstm]) and "PCA" in complexity_legend([lstm, pca])
     assert "O\\,=" not in complexity_legend([lstm, pca])
     assert complexity_table(pd.DataFrame(cx_rows), "geo", "phys").empty
+    # parse_conformal: the exact block reportConformal prints, including 'always', a '-' precision,
+    # a class with no eval frames, and the next section starting straight after it.
+    block = (
+        "LSTM Joint Uncertainty (temperature scaling + Mondrian conformal)\n"
+        "  joint: T = 1.048, eval ECE 1.00% -> 0.93%\n"
+        "  Conformal sets at 90% per-class coverage, n=27000 eval frames\n"
+        "  class          asserted at  precision  covered  certain  ambiguous  abstain   wrong\n"
+        "  No Thrust      P >= 77.64%      99.5%    90.8%    90.8%       0.0%     4.7%    4.4%\n"
+        "  Chemical       P >= 99.98%     100.0%    91.0%    91.0%       0.0%     9.0%    0.0%\n"
+        "  Electric            always          -    90.5%    90.5%       0.0%     7.6%    1.9%\n"
+        "  Impulsive      P >= 99.98%          -   no eval frames\n"
+        "  all                              96.1%    90.8%    90.8%       0.0%     5.6%    3.7%\n"
+        "\nEntering LSTM Stage 1 (Detector) Training Loop\nAccuracy: 50.00% (1/2)\n"
+        "MiniRocket Cascade Uncertainty (temperature scaling + Mondrian conformal)\n"
+        "  stage1: T = 0.428, eval ECE 11.84% -> 3.47%\n"
+        "  Conformal sets at 95% per-class coverage, 9000 eval frames\n"
+        "  all                              91.0%    95.2%    90.0%       5.2%     1.0%    3.8%\n")
+    pc = parse_conformal(block)
+    assert [(r["model"], r["approach"], r["class"]) for r in pc] == [
+        ("LSTM", "Joint", "No Thrust"), ("LSTM", "Joint", "Chemical"), ("LSTM", "Joint", "Electric"),
+        ("LSTM", "Joint", "All"), ("MiniRocket", "Cascade", "All")], pc
+    assert abs(pc[0]["threshold"] - 0.7764) < 1e-9 and abs(pc[0]["wrong"] - 0.044) < 1e-9
+    assert pd.isna(pc[2]["threshold"]) and pd.isna(pc[2]["precision"]) and pc[2]["coverage"] == 0.905
+    assert pd.isna(pc[3]["threshold"]) and pc[3]["precision"] == 0.961
+    assert pc[0]["target"] == 0.9 and pc[4]["target"] == 0.95
+    # conformal_table: classic-then-deep rows, Joint before Cascade, 4 classes x 4 + All x 3 columns.
+    cf_rows = [{"train": "leo", "test": te, "feat": "phys", "propMin": 30, "seed": sd, **r,
+                "model": mo, "approach": ap}
+               for te in ("leo", "geo") for sd in (0, 1, 2) for mo in ("LSTM", "LightGBM")
+               for ap in ("Cascade", "Joint") for r in pc[:4]]
+    cft = pd.DataFrame(cf_rows)
+    tex_c = conformal_table(cft, "leo", "leo", "phys", 30, seeds=3)
+    body = [ln for ln in tex_c.splitlines() if "& Joint &" in ln or "& Cascade &" in ln]
+    assert [ln.split("&")[1].strip() for ln in body] == ["Joint", "Cascade"] * 2, body
+    assert "{LightGBM}" in body[0] and "{LSTM}" in body[2], body
+    assert all(ln.count("&") == 1 + 4 * 4 + 3 for ln in body), body   # Model & Approach & 19 data
+    assert "77.64" in tex_c and "99.5" in tex_c and "90\\% target" in tex_c
+    assert "does not hold" not in tex_c
+    assert "does not hold" in conformal_table(cft, "leo", "geo", "phys", 30, seeds=3)
+    assert conformal_table(cft, "geo", "geo", "phys", 30, seeds=3) is None
+    # Whole-trajectory blocks carry no approach -- including a model name with spaces and parens.
+    tot = parse_conformal(
+        "Decision Trees (LightGBM) Uncertainty (temperature scaling + Mondrian conformal)\n"
+        "  whole-trajectory: T = 0.978, eval ECE 1.11% -> 1.07%\n"
+        "  Conformal sets at 90% per-class coverage, n=900 eval trajectories\n"
+        "  Chemical       P >= 99.98%     100.0%    91.0%    91.0%       0.0%     9.0%    0.0%\n"
+        "\nEntering MiniRocket Training Loop\n")
+    assert [(r["model"], r["approach"], r["class"]) for r in tot] == [
+        ("Decision Trees (LightGBM)", "", "Chemical")], tot
+    one = cft[cft.approach == "Joint"].assign(approach="Whole-trajectory")
+    tex_t = conformal_table(one, "leo", "leo", "phys", 30, seeds=3, approaches=("Whole-trajectory",),
+                            unit="trajectories", what="W", label="tab:total_x", long_csv="total_c.csv")
+    rows_t = [ln for ln in tex_t.splitlines() if ln.startswith(("LightGBM &", "LSTM &"))]
+    assert len(rows_t) == 2 and all(ln.count("&") == 4 * 4 + 3 for ln in rows_t), rows_t  # no Approach column
+    assert "tab:total_x" in tex_t and "trajectories whose set" in tex_t and "total\\_c.csv" in tex_t
     print("selfcheck ok")
 
 

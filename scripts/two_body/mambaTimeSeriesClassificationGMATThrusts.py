@@ -15,6 +15,10 @@
 # z-score normalization (fit on the training split) instead of the ECI/OE-specific normalization.
 # $ python scripts/classification/mambaTimeSeriesClassificationGMATThrusts.py \
 # --systems 800 --propMin 30 --frame aer --orbit vleo
+#
+# --conformal ALPHA: post-hoc temperature scaling + per-class (Mondrian) conformal prediction sets for
+# LightGBM/MiniRocket/LSTM/Mamba/Transformer/CNN, via conformal.py (shared with the in-sequence
+# script; each trajectory is one exchangeable sample). Needs --eval-test in-distribution.
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -72,6 +76,16 @@ parser.add_argument("--residual-ladder", dest="use_residual_ladder", action="sto
                      help="--seq-data only: append the 3 lean residual-ladder channels, as in the in-sequence script.")
 parser.add_argument("--standardize", action="store_true",
                      help="--seq-data only: z-score every channel with train-split statistics. Tagged as Std_.")
+parser.add_argument("--conformal", dest="conformal_alpha", type=float, default=0.0, metavar="ALPHA",
+                     help="If > 0, after each LightGBM/MiniRocket/LSTM/Mamba/Transformer/CNN evaluation: fit a "
+                          "temperature on the validation split, then report class-conditional (Mondrian) "
+                          "conformal prediction sets at miscoverage ALPHA (e.g. 0.1 -> each class's true "
+                          "trajectories are in the set >= 90%% of the time), with per-class asserted-at "
+                          "threshold, precision, coverage and abstention (conformal.py, shared with the "
+                          "in-sequence script). Post-hoc only: no other reported number changes. Calibrates "
+                          "on the validation split, so it needs a held-out eval split: --eval-test "
+                          "in-distribution, or a cross-orbit --test (where the guarantee no longer holds and "
+                          "the reported coverage measures the shift). 0 (default): off.")
 
 parser.set_defaults(use_lstm=True)
 parser.set_defaults(OE=False)
@@ -132,6 +146,7 @@ useSeqData = args.seq_data
 useJ2Energy = args.use_j2_energy
 useResidualLadder = args.use_residual_ladder
 useStandardize = args.standardize
+conformalAlpha = args.conformal_alpha
 # every eval site below reports on the held-out test split iff this is set
 evalOnTest = evalTest or testSet != orbitType
 
@@ -178,6 +193,7 @@ from qutils.ml.classifer import trainClassifier, validateMultiClassClassifier
 from qutils.ml.mamba import Mamba, MambaConfig
 from qutils.ml.superweight import printoutMaxLayerWeight,getSuperWeight,plotSuperWeight, findMambaSuperActivation,plotSuperActivation
 from qutils.ml.shap import run_shap_analysis
+from conformal import calibratedProbs, printHeader, reportConformal
 
 if runSeed is not None:
     # the IC split in prepareThrustClassificationDatasets/loadGroundStationDataset draws from np.random
@@ -685,6 +701,46 @@ def loadSeqDataset(yaml_config, data_config, train_ratio, val_ratio, test_ratio,
                         test_data, test_joint.max(axis=1, keepdims=True), batch_size)
 
 
+# ---------------------------------------------------------------------------
+# --conformal glue: [N,C] scores per model family -> conformal.py. Whole-trajectory is the T = 1 case
+# of the per-timestep core, so each trajectory is one exchangeable sample and the coverage guarantee
+# is the textbook split-conformal one.
+# ---------------------------------------------------------------------------
+def _neuralScores(model, loader, device):
+    """[N,C] logits and [N] labels, in (non-shuffled) loader order."""
+    model.eval()
+    z, y = [], []
+    with torch.no_grad():
+        for x, lab in loader:
+            z.append(model(x.to(device, torch.float64)).cpu())
+            y.append(lab.view(-1))
+    return torch.cat(z).numpy(), torch.cat(y).numpy()
+
+
+def _logProbaScores(model, data):
+    """Log predict_proba on the flattened [N,T,C] features the GBDTs are fitted on."""
+    assert np.array_equal(model.classes_, np.arange(len(model.classes_))), "a class was missing from training"
+    return np.log(np.clip(model.predict_proba(data.reshape(len(data), -1).astype(np.float32)), 1e-12, None))
+
+
+def _miniRocketScores(clf, data):
+    """RocketClassifier.predict_proba is one-hot (ridge head), so the score is the ridge
+    decision_function of the pipeline sktime itself dispatches to (_get_delegate)."""
+    pipe = clf._get_delegate()
+    assert np.array_equal(pipe.classifier_.classes_, np.arange(len(pipe.classifier_.classes_)))
+    return pipe.classifier_.decision_function(pipe.transformers_.transform(np.transpose(data, (0, 2, 1))))
+
+
+def conformalReport(name, z_cal, y_cal, z_eval, y_eval, class_names):
+    """name must be the model's 'Entering <name> Training Loop' name: aggregateManuscriptTotal.py
+    maps it onto the in-sequence tables' model names."""
+    y_cal, y_eval = np.asarray(y_cal).reshape(-1, 1), np.asarray(y_eval).reshape(-1, 1)
+    printHeader(name)
+    pc, pe = calibratedProbs(np.asarray(z_cal)[:, None], y_cal, np.asarray(z_eval)[:, None], y_eval,
+                             "whole-trajectory")
+    reportConformal(pc, y_cal, pe, y_eval, class_names, conformalAlpha, unit="trajectories")
+
+
 def main():
     import yaml
     with open("data.yaml", 'r') as f:
@@ -772,6 +828,14 @@ def main():
 
     classlabels = ['No Thrust','Chemical','Electric','Impulsive']
 
+    # --conformal calibrates on the validation split; with eval also on it, coverage would be in-sample.
+    # ponytail: val also drives early stopping, so its scores are mildly optimistic -> coverage can
+    # land slightly under target; a 4th IC-disjoint calibration split fixes that if it matters.
+    runConformal = conformalAlpha > 0 and evalOnTest
+    if conformalAlpha > 0 and not evalOnTest:
+        print("[skip] --conformal calibrates on the validation split, which is also the eval split "
+              "here; add --eval-test to report conformal sets on the held-out test split.")
+
     if useHybrid:
         config_hybrid = MambaConfig(d_model=hidden_size * 2,n_layers = 1,expand_factor=1,d_state=32,d_conv=16,classifer=True)
 
@@ -813,6 +877,9 @@ def main():
         DTTimerInference = timer()
         validate_lightgbm(classicModel, _eval_loader_classic, num_classes, classlabels=classlabels, print_report=True)
         DTTimerInference.tocStr("Decision Trees (LightGBM) Inference Time")
+        if runConformal:
+            conformalReport("Decision Trees (LightGBM)", _logProbaScores(classicModel, val_data), val_label,
+                            _logProbaScores(classicModel, test_data), test_label, classlabels)
 
     if use_xgboost:
         from xgboost import XGBClassifier
@@ -974,6 +1041,9 @@ def main():
         _eval_loader_MR = test_loader if evalOnTest else val_loader
         validate_minirocket(clf_mr, _eval_loader_MR, num_classes, classlabels=classlabels)
         mrInference.tocStr("MiniRocket Inference Time")
+        if runConformal:
+            conformalReport("MiniRocket", _miniRocketScores(clf_mr, val_data), val_label,
+                            _miniRocketScores(clf_mr, test_data), test_label, classlabels)
 
     if use_lstm:
         model_LSTM = BiLSTMClassifier(input_size, int(3 * hidden_size // 4), num_layers, num_classes).to(device).double()
@@ -993,6 +1063,9 @@ def main():
         _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_LSTM,_eval_loader,criterion,num_classes,device,classlabels,printReport=True)
         LSTMInference.tocStr("LSTM Inference Time")
+        if runConformal:
+            conformalReport("LSTM", *_neuralScores(model_LSTM, val_loader, device),
+                            *_neuralScores(model_LSTM, test_loader, device), classlabels)
         if frame == "aer":
             feat_names = ['Az','El','Range','dAz','dEl','dRange']
         elif frame == "radec":
@@ -1029,6 +1102,9 @@ def main():
     _eval_loader = test_loader if evalOnTest else val_loader
     validateMultiClassClassifier(model_mamba, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
     mambaInference.tocStr("Mamba Inference Time")
+    if runConformal:
+        conformalReport("Mamba", *_neuralScores(model_mamba, val_loader, device),
+                        *_neuralScores(model_mamba, test_loader, device), classlabels)
 
     if use_transformer:
         print("\nEntering Transformer Training Loop")
@@ -1048,6 +1124,9 @@ def main():
         _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_transformer, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         transformerInference.tocStr("Transformer Inference Time")
+        if runConformal:
+            conformalReport("Transformer", *_neuralScores(model_transformer, val_loader, device),
+                            *_neuralScores(model_transformer, test_loader, device), classlabels)
 
     if use_cnn:
         print("\nEntering 1D-CNN (InceptionTime) Training Loop")
@@ -1067,6 +1146,9 @@ def main():
         _eval_loader = test_loader if evalOnTest else val_loader
         validateMultiClassClassifier(model_cnn, _eval_loader, criterion, num_classes, device, classlabels, printReport=True)
         cnnInference.tocStr("1D-CNN (InceptionTime) Inference Time")
+        if runConformal:
+            conformalReport("1D-CNN (InceptionTime)", *_neuralScores(model_cnn, val_loader, device),
+                            *_neuralScores(model_cnn, test_loader, device), classlabels)
 
     if frame == "aer":
         feat_names = ['Az','El','Range','dAz','dEl','dRange']

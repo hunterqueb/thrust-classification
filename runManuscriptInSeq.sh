@@ -27,6 +27,12 @@
 #   DRY_RUN=1 ./runManuscriptSweep.sh | grep 'would write' | sort | uniq -d   # must be empty
 #   SEEDS=0 PROP_MINS=10 FEATS=phys ARMS="leo:leo" EXTRA="--one-pass" EXTRA_TOK="OnePass_" \
 #     SKIP_PARSE=1 ./runManuscriptSweep.sh
+#
+# Conformal uncertainty on every cell (temperature scaling + per-class conformal sets, see
+# docs/in_sequence_classification.md "Uncertainty"):
+#   CONFORMAL=0.1 ./runManuscriptInSeq.sh
+# --conformal adds no strAdd token, so the stem is unchanged; instead the completion marker moves
+# to the conformal block, and every existing log without one re-runs (all 135 -> ~57 hours).
 
 set -euo pipefail
 
@@ -40,6 +46,7 @@ EXTRA_TOK="${EXTRA_TOK:-}"    # MUST mirror what EXTRA adds to strAdd, e.g. "One
 PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
+CONFORMAL="${CONFORMAL:-0.1}"    # miscoverage alpha, e.g. 0.1; empty = off
 
 SCRIPT=scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py
 
@@ -67,6 +74,13 @@ COMMON=(
     --minirocket
     --save
 )
+# MiniRocket is dispatched last in main(), and its conformal block prints after its cascade report,
+# so the marker is always the last thing a complete run writes.
+MARKER="MiniRocket Cascade Inference Time"
+if [ -n "$CONFORMAL" ]; then
+    COMMON+=(--conformal "$CONFORMAL")
+    MARKER="MiniRocket Cascade Uncertainty"
+fi
 
 FAILED=""
 DONE=0
@@ -108,7 +122,7 @@ run_one() {   # train test feat propMin seed
     # last in main(), after the classic-ML/LightGBM one, so ITS final line is the marker -- keying
     # on LightGBM's would treat a run that died inside MiniRocket as complete. Consequence: logs
     # produced before --minirocket joined COMMON lack this line and correctly re-run.
-    if [ -f "$log" ] && grep -q "MiniRocket Cascade Inference Time" "$log"; then
+    if [ -f "$log" ] && grep -q "$MARKER" "$log"; then
         echo "[skip] $stem"
         SKIPPED=$((SKIPPED + 1))
         return 0
