@@ -29,8 +29,8 @@
 #     SKIP_PARSE=1 ./runManuscriptSweep.sh
 #
 # Conformal uncertainty on every cell (temperature scaling + per-class conformal sets, see
-# docs/in_sequence_classification.md "Uncertainty"):
-#   CONFORMAL=0.1 ./runManuscriptInSeq.sh
+# docs/in_sequence_classification.md "Uncertainty (--conformal ALPHA)"):
+#   CONFORMAL=0.05 ./runManuscriptInSeq.sh
 # --conformal adds no strAdd token, so the stem is unchanged; instead the completion marker moves
 # to the conformal block, and every existing log without one re-runs (all 135 -> ~57 hours).
 
@@ -46,7 +46,7 @@ EXTRA_TOK="${EXTRA_TOK:-}"    # MUST mirror what EXTRA adds to strAdd, e.g. "One
 PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
-CONFORMAL="${CONFORMAL:-0.1}"    # miscoverage alpha, e.g. 0.1; empty = off
+CONFORMAL="${CONFORMAL:-0.05}"   # miscoverage alpha, 0.05 = 95% coverage; empty = off
 
 SCRIPT=scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py
 
@@ -77,9 +77,14 @@ COMMON=(
 # MiniRocket is dispatched last in main(), and its conformal block prints after its cascade report,
 # so the marker is always the last thing a complete run writes.
 MARKER="MiniRocket Cascade Inference Time"
+# With --conformal --save each model's raw scores also go to scores/<stem>/ for
+# scripts/two_body/uncertaintyReport.py; MiniRocket's cascade file is written last, so a log whose
+# conformal block predates the score dump (or whose run died while writing it) re-runs.
+SCORES_LAST=""
 if [ -n "$CONFORMAL" ]; then
     COMMON+=(--conformal "$CONFORMAL")
     MARKER="MiniRocket Cascade Uncertainty"
+    SCORES_LAST="MiniRocket_Cascade.npz"
 fi
 
 FAILED=""
@@ -122,7 +127,8 @@ run_one() {   # train test feat propMin seed
     # last in main(), after the classic-ML/LightGBM one, so ITS final line is the marker -- keying
     # on LightGBM's would treat a run that died inside MiniRocket as complete. Consequence: logs
     # produced before --minirocket joined COMMON lack this line and correctly re-run.
-    if [ -f "$log" ] && grep -q "$MARKER" "$log"; then
+    local scores="gmat/data/seqClassification/${train}/${propMin}min-${SYSTEMS}/scores/${stem}/${SCORES_LAST}"
+    if [ -f "$log" ] && grep -q "$MARKER" "$log" && { [ -z "$SCORES_LAST" ] || [ -f "$scores" ]; }; then
         echo "[skip] $stem"
         SKIPPED=$((SKIPPED + 1))
         return 0
@@ -161,6 +167,12 @@ echo "ran=${DONE} skipped=${SKIPPED}"
 [ -n "$FAILED" ] && echo "FAILED:${FAILED}"
 
 if [ "$SKIP_PARSE" = 1 ]; then exit 0; fi
+
+# Confidence intervals + selective classification from the saved scores -> manuscript_tables/
+# uncertainty_*.csv, which aggregateManuscript.py turns into t9_ci_* / t10_selective_*.
+if [ -n "$CONFORMAL" ]; then
+    "$PYTHON" scripts/two_body/uncertaintyReport.py --task seq
+fi
 
 # One group CSV per TRAIN orbit: cross-regime logs live under the train orbit's directory, since
 # logLoc uses --orbit. So leo/ picks up both leo->leo and leo->geo.

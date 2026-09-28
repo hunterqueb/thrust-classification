@@ -206,8 +206,8 @@ parser.add_argument("--eval-test", dest="eval_test", action="store_true",
 parser.add_argument("--conformal", dest="conformal_alpha", type=float, default=0.0, metavar="ALPHA",
                      help="If > 0, after each neural, LightGBM and MiniRocket joint/cascade evaluation: fit a temperature on the "
                           "validation split, then report class-conditional (Mondrian) conformal prediction "
-                          "sets at miscoverage ALPHA (e.g. 0.1 -> each thrust type's true frames are in the "
-                          "set >= 90%% of the time) with per-class coverage, set sizes and ECE before/after "
+                          "sets at miscoverage ALPHA (e.g. 0.05 -> each thrust type's true frames are in the "
+                          "set >= 95%% of the time) with per-class coverage, set sizes and ECE before/after "
                           "scaling. Post-hoc only: no other reported number changes. Calibrates on the "
                           "validation split, so it needs a held-out eval split: --eval-test in-distribution "
                           "(cross-orbit runs already have one, but the coverage guarantee assumes the eval "
@@ -312,7 +312,7 @@ if runSeed is not None:
 device = getDevice()
 
 from seqData import *  # noqa: F401,F403 -- residual-ladder names, label conventions, data loading
-from conformal import calibratedProbs, printHeader, reportConformal
+from conformal import composedProbs, printHeader, reportConformal, saveScores
 
 
 strAdd = ""
@@ -368,6 +368,9 @@ print(f"Training with {int(4*train_ratio*numRandSys)} systems")
 logLoc = "gmat/data/seqClassification/" + str(orbitType) + "/" + str(numMinProp) + "min-" + str(numRandSys) + "/"
 logStem = str(numMinProp) + "min" + str(numRandSys) + strAdd
 logFileLoc = logLoc + logStem + '.log'
+# --conformal under --save: raw scores per model for scripts/two_body/uncertaintyReport.py. Gated on
+# --save so an unsaved dev run with the same flags cannot overwrite a logged run's scores.
+scoresLoc = logLoc + "scores/" + logStem + "/"
 
 # Per-timestep sequence-prediction plots (see plotSequencePrediction) are generated regardless of
 # --save, since they're a standalone visual artifact rather than part of the redirected log.
@@ -1155,35 +1158,22 @@ def _collectLogits(model, loader, device):
     return torch.cat(logits), torch.cat(labels).numpy()
 
 
-def _stageLabels(y_joint, mode, pad_idx=-100):
-    """Joint [N,T] labels -> that mode's label view. pad_idx in y_joint marks frames a model has no
-    prediction for (e.g. the classic models' first hankel_L-1 frames) and stays pad_idx in every view."""
-    if mode == "joint":
-        return y_joint
-    y = _deriveStage1Stage2(y_joint, pad_idx)[0 if mode == "stage1" else 1]
-    return np.where(y_joint == pad_idx, pad_idx, y)
-
-
-def _calibratedProbs(z_cal, y_cal, z_eval, y_eval, mode, pad_idx=-100):
-    """conformal.calibratedProbs against this mode's own label view."""
-    return calibratedProbs(z_cal, _stageLabels(y_cal, mode, pad_idx), z_eval, _stageLabels(y_eval, mode, pad_idx),
-                           mode, pad_idx)
-
-
-def runUncertaintyReport(scores, y_cal, y_eval, alpha, name, pad_idx=-100):
+def runUncertaintyReport(scores, y_cal, y_eval, alpha, name, pad_idx=-100, valid_from=0):
     """scores: {'joint': (z_cal, z_eval)} or {'stage1': (...), 'stage2': (...)}, each [N,T,C];
-    y_cal/y_eval: [N,T] joint labels, pad_idx where the model has no prediction. A cascade's
-    calibrated stages compose into joint probabilities P(NoThrust) = P1(no),
-    P(type) = P1(yes) * P2(type | thrust), so every model family and both forms get conformal sets
-    over the same 4 classes and compare directly."""
+    y_cal/y_eval: [N,T] joint labels; frames t < valid_from have no prediction (the classic models'
+    first hankel_L-1 frames) and are masked out. conformal.composedProbs turns a cascade's
+    calibrated stages into joint probabilities, so every model family and both forms get conformal
+    sets over the same 4 classes and compare directly.
+    Under --save the raw inputs also go to <logLoc>/scores/<logStem>/ for uncertaintyReport.py --
+    written after the report, so a file's existence implies its log block is complete."""
     printHeader(name)
-    probs = {mode: _calibratedProbs(zc, y_cal, ze, y_eval, mode, pad_idx) for mode, (zc, ze) in scores.items()}
-    if "joint" in probs:
-        pc, pe = probs["joint"]
-    else:
-        compose = lambda p1, p2: np.concatenate([p1[..., :1], p1[..., 1:] * p2], axis=-1)
-        pc, pe = (compose(p1, p2) for p1, p2 in zip(probs["stage1"], probs["stage2"]))
-    return reportConformal(pc, y_cal, pe, y_eval, JOINT_CLASS_NAMES, alpha, pad_idx)
+    mask = lambda y: np.where(np.arange(y.shape[1]) < valid_from, pad_idx, y)
+    pc, pe = composedProbs(scores, mask(y_cal), mask(y_eval), pad_idx)
+    q = reportConformal(pc, mask(y_cal), pe, mask(y_eval), JOINT_CLASS_NAMES, alpha, pad_idx)
+    if save_to_log:
+        model, approach = name.rsplit(" ", 1)
+        saveScores(scoresLoc, model, approach, scores, y_cal, y_eval, alpha, pad_idx, valid_from)
+    return q
 
 
 def runNeuralUncertainty(models, cal_loader, eval_loader, device, alpha, name):
@@ -1259,9 +1249,8 @@ def _classicUncertainty(models, cal, eval_data, eval_joint, hankel_L, name, pad_
     cal_data, cal_joint = cal
     scores = {mode: (classicScoreGrid(m, cal_data, hankel_L), classicScoreGrid(m, eval_data, hankel_L))
               for mode, m in models.items()}
-    no_window = np.arange(eval_joint.shape[1]) < hankel_L - 1
-    mask = lambda y: np.where(no_window, pad_idx, y)
-    return runUncertaintyReport(scores, mask(cal_joint), mask(eval_joint), conformalAlpha, name, pad_idx)
+    return runUncertaintyReport(scores, cal_joint, eval_joint, conformalAlpha, name, pad_idx,
+                                valid_from=hankel_L - 1)
 
 
 def evaluateClassicPerTimestep(model, eval_data, eval_labels, class_names, hankel_L=5, pad_idx=-100, print_report=True):

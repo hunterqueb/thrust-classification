@@ -26,7 +26,7 @@
 #
 # Conformal uncertainty on every cell (temperature scaling + per-class conformal sets, shared with the
 # in-sequence sweep via scripts/two_body/conformal.py):
-#   CONFORMAL=0.1 ./runManuscriptTotal.sh
+#   CONFORMAL=0.05 ./runManuscriptTotal.sh
 # --conformal adds no strAdd token, so the stem is unchanged; instead the completion marker moves
 # to the CNN's conformal block, and every existing log without one re-runs.
 
@@ -42,7 +42,7 @@ EXTRA_TOK="${EXTRA_TOK:-}"    # MUST mirror what EXTRA adds to strAdd, e.g. "One
 PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
-CONFORMAL="${CONFORMAL:-0.1}"    # miscoverage alpha, e.g. 0.1; empty = off
+CONFORMAL="${CONFORMAL:-0.05}"   # miscoverage alpha, 0.05 = 95% coverage; empty = off
 
 SCRIPT=scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py
 
@@ -62,9 +62,14 @@ COMMON=(
 # The CNN is the last model main() runs, and its conformal block prints after its inference time,
 # so the marker is always the last thing a complete run writes.
 MARKER="1D-CNN (InceptionTime) Inference Time"
+# With --conformal --save each model's raw scores also go to scores/<stem>/ for
+# scripts/two_body/uncertaintyReport.py; the CNN's file is written last, so a log whose conformal
+# block predates the score dump (or whose run died while writing it) re-runs.
+SCORES_LAST=""
 if [ -n "$CONFORMAL" ]; then
     COMMON+=(--conformal "$CONFORMAL")
     MARKER="1D-CNN (InceptionTime) Uncertainty"
+    SCORES_LAST="1D_CNN_InceptionTime.npz"
 fi
 
 FAILED=""
@@ -100,7 +105,8 @@ run_one() {   # train test feat propMin seed
 
     # Completion marker: the CNN is the last model main() runs, so a partial log (--save opens it
     # 'w' at startup) lacks this line and re-runs.
-    if [ -f "$log" ] && grep -q "$MARKER" "$log"; then
+    local scores="gmat/data/classification/${train}/${propMin}min-${SYSTEMS}/scores/${stem}/${SCORES_LAST}"
+    if [ -f "$log" ] && grep -q "$MARKER" "$log" && { [ -z "$SCORES_LAST" ] || [ -f "$scores" ]; }; then
         echo "[skip] $stem"
         SKIPPED=$((SKIPPED + 1))
         return 0
@@ -138,6 +144,13 @@ echo "ran=${DONE} skipped=${SKIPPED}"
 [ -n "$FAILED" ] && echo "FAILED:${FAILED}"
 
 if [ "$SKIP_PARSE" = 1 ] || [ "$DRY_RUN" = 1 ]; then exit 0; fi
+
+# Selective classification + conformal-rate CIs from the saved scores -> manuscript_tables/
+# total_uncertainty_*.csv, which aggregateManuscriptTotal.py turns into total_t10_selective_*.
+# (Its total_t9_ci_* R/P/F1 intervals come from the logged confusion matrices and need no scores.)
+if [ -n "$CONFORMAL" ]; then
+    "$PYTHON" scripts/two_body/uncertaintyReport.py --task total
+fi
 
 # One group CSV per TRAIN orbit (cross-regime logs live under the train orbit's directory), then
 # mean +/- std over seeds -> gmat/data/classification/manuscript_tables/total_*.tex. NOT

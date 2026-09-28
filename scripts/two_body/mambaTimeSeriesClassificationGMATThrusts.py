@@ -79,8 +79,8 @@ parser.add_argument("--standardize", action="store_true",
 parser.add_argument("--conformal", dest="conformal_alpha", type=float, default=0.0, metavar="ALPHA",
                      help="If > 0, after each LightGBM/MiniRocket/LSTM/Mamba/Transformer/CNN evaluation: fit a "
                           "temperature on the validation split, then report class-conditional (Mondrian) "
-                          "conformal prediction sets at miscoverage ALPHA (e.g. 0.1 -> each class's true "
-                          "trajectories are in the set >= 90%% of the time), with per-class asserted-at "
+                          "conformal prediction sets at miscoverage ALPHA (e.g. 0.05 -> each class's true "
+                          "trajectories are in the set >= 95%% of the time), with per-class asserted-at "
                           "threshold, precision, coverage and abstention (conformal.py, shared with the "
                           "in-sequence script). Post-hoc only: no other reported number changes. Calibrates "
                           "on the validation split, so it needs a held-out eval split: --eval-test "
@@ -193,7 +193,7 @@ from qutils.ml.classifer import trainClassifier, validateMultiClassClassifier
 from qutils.ml.mamba import Mamba, MambaConfig
 from qutils.ml.superweight import printoutMaxLayerWeight,getSuperWeight,plotSuperWeight, findMambaSuperActivation,plotSuperActivation
 from qutils.ml.shap import run_shap_analysis
-from conformal import calibratedProbs, printHeader, reportConformal
+from conformal import calibratedProbs, printHeader, reportConformal, saveScores
 
 if runSeed is not None:
     # the IC split in prepareThrustClassificationDatasets/loadGroundStationDataset draws from np.random
@@ -516,6 +516,9 @@ print(f"Training with {int(4*train_ratio*numRandSys)} systems")
 
 logLoc = "gmat/data/classification/"+str(orbitType)+"/" + str(numMinProp) + "min-" + str(numRandSys) + "/"
 logFileLoc = logLoc + str(numMinProp) + "min" + str(numRandSys)+ strAdd +'.log'
+# --conformal under --save: raw scores per model for scripts/two_body/uncertaintyReport.py. Gated on
+# --save so an unsaved dev run with the same flags cannot overwrite a logged run's scores.
+scoresLoc = logLoc + "scores/" + str(numMinProp) + "min" + str(numRandSys) + strAdd + "/"
 _frameTag = frame if frame != "eci" else ("OE" if useOE else "cart")
 shap_dir_mamba = logLoc+ f"shap/mamba_{orbitType}_eval_{_frameTag}_"+str(strAdd)
 shap_dir_lstm = logLoc+ f"shap/lstm_{orbitType}_eval_{_frameTag}_"+str(strAdd)
@@ -733,12 +736,15 @@ def _miniRocketScores(clf, data):
 
 def conformalReport(name, z_cal, y_cal, z_eval, y_eval, class_names):
     """name must be the model's 'Entering <name> Training Loop' name: aggregateManuscriptTotal.py
-    maps it onto the in-sequence tables' model names."""
+    maps it onto the in-sequence tables' model names. Under --save the raw inputs also go to
+    <logLoc>/scores/<log stem>/ for uncertaintyReport.py, after the report is printed."""
     y_cal, y_eval = np.asarray(y_cal).reshape(-1, 1), np.asarray(y_eval).reshape(-1, 1)
+    z_cal, z_eval = np.asarray(z_cal)[:, None], np.asarray(z_eval)[:, None]
     printHeader(name)
-    pc, pe = calibratedProbs(np.asarray(z_cal)[:, None], y_cal, np.asarray(z_eval)[:, None], y_eval,
-                             "whole-trajectory")
+    pc, pe = calibratedProbs(z_cal, y_cal, z_eval, y_eval, "whole-trajectory")
     reportConformal(pc, y_cal, pe, y_eval, class_names, conformalAlpha, unit="trajectories")
+    if save_to_log:
+        saveScores(scoresLoc, name, "", {"joint": (z_cal, z_eval)}, y_cal, y_eval, conformalAlpha)
 
 
 def main():
