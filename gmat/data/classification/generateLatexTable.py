@@ -246,7 +246,7 @@ def make_latex_table(best: pd.DataFrame, caption: str, label: str, train_sets: L
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.1}
 
-\resizebox{\textwidth}{!}{%
+\resizebox{\ifdim\width>\textwidth\textwidth\else\width\fi}{!}{%
 \begin{tabular}{""" + colspec + r"""}
 \toprule
 """ + top_row + """

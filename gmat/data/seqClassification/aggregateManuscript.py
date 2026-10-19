@@ -207,7 +207,7 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
                 decimals: int = 2, use_color: bool = True,
                 color_lo: float = 0.25, color_hi: float = 0.75,
                 approaches: dict | None = None, what: str | None = None,
-                label: str | None = None) -> str | None:
+                label: str | None = None, ci=None, ci_note: str = "") -> str | None:
     """One table per orbit group: Joint vs Cascade macro R/P/F1 across every propagation window.
 
     train == test gives the in-distribution table; train != test gives the out-of-distribution
@@ -221,6 +221,9 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     approaches/what/label let the whole-trajectory aggregator (classification/
     aggregateManuscriptTotal.py) reuse this layout with its single approach; the defaults are
     this script's Joint/Cascade table.
+
+    ci: optional (model, eval_stage, propMin, metric) -> (lo, hi) or None. When given, each model
+    row is followed by a small [lo, hi] row and ci_note is appended to the caption.
     """
     approaches = approaches or APPROACH_LABEL
     what = what or ("Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class "
@@ -270,13 +273,16 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
                              color_lo=color_lo, color_hi=color_hi)
                  for st, pm in blocks for m, _ in RPF1]
         rows.append(f"\\textbf{{{model}}} & " + " & ".join(cells) + r" \\")
+        if ci is not None:
+            rows.append(" & " + " & ".join(_ci_cell(ci(model, st, pm, m), decimals)
+                                           for st, pm in blocks for m, _ in RPF1) + r" \\")
 
     hdr = " & ".join(lbl for _ in blocks for _, lbl in RPF1)
     return (
         "% Requires \\usepackage[table]{xcolor} in LaTeX preamble.\n"
         "\\begin{table}[t]\n\\centering\n\\setlength{\\tabcolsep}{3pt}\n"
         "\\renewcommand{\\arraystretch}{1.1}\n\n"
-        "\\resizebox{\\textwidth}{!}{%\n"
+        "\\resizebox{\\ifdim\\width>\\textwidth\\textwidth\\else\\width\\fi}{!}{%\n"
         f"\\begin{{tabular}}{{{spec}}}\n\\toprule\n"
         f" & {' & '.join(top)} \\\\\n{''.join(tcm)}\n"
         f" & {' & '.join(mid)} \\\\\n{''.join(mcm)}\n"
@@ -287,9 +293,17 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
         f"features, "
         f"at {'/'.join(str(p) for p in props)} minutes. Mean over {seeds} seeds; per-seed spread in "
         f"eval\\_long.csv. Bold = best per approach/time/metric. Cell colour: red\\,=\\,low, "
-        f"green\\,=\\,high.}}\n"
+        f"green\\,=\\,high.{(' ' + ci_note) if ci is not None and ci_note else ''}}}\n"
         f"\\label{{tab:{label}}}\n\\end{{table}}\n"
     )
+
+
+def _ci_cell(lohi, decimals: int) -> str:
+    """[lo, hi] in scriptsize, leading zeros dropped so it stays about as wide as the mean above it."""
+    if lohi is None or any(pd.isna(v) for v in lohi):
+        return "{\\scriptsize --}"
+    lo, hi = (f"{v:.{decimals}f}".lstrip("0") or "0" for v in lohi)
+    return f"{{\\scriptsize [{lo}, {hi}]}}"
 
 
 COMPLEXITY_APPROACHES = ["Joint", "Cascade"]
@@ -429,7 +443,7 @@ def conformal_table(cf: pd.DataFrame, train: str, test: str, feat: str, prop: in
              " the coverage columns measure how much of it survives the regime shift.")
     return (
         "% Requires \\usepackage{multirow} and \\usepackage{booktabs} in LaTeX preamble.\n"
-        "\\begin{table}[t]\n\\centering\n\\setlength{\\tabcolsep}{3pt}\n\\resizebox{\\textwidth}{!}{%\n"
+        "\\begin{table}[t]\n\\centering\n\\setlength{\\tabcolsep}{3pt}\n\\resizebox{\\ifdim\\width>\\textwidth\\textwidth\\else\\width\\fi}{!}{%\n"
         + piv.to_latex(escape=False, multicolumn_format="c", column_format="l" * piv.index.nlevels + "c" * len(cols))
         + "}\n"
         f"\\caption{{{what}, {_arm_phrase(train, test)}, {feat_label(feat)} "

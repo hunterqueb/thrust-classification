@@ -332,7 +332,7 @@ def make_latex_table(
         + "\\centering\n"
         + "\\setlength{\\tabcolsep}{3pt}\n"
         + "\\renewcommand{\\arraystretch}{1.1}\n\n"
-        + "\\resizebox{\\textwidth}{!}{%\n"
+        + "\\resizebox{\\ifdim\\width>\\textwidth\\textwidth\\else\\width\\fi}{!}{%\n"
         + "\\begin{tabular}{" + colspec + "}\n"
         + "\\toprule\n"
         + top_row + "\n"

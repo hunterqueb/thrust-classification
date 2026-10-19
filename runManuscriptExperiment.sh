@@ -1,4 +1,4 @@
 #!/bin/sh
 
-./runManuscriptTotal.sh
 ./runManuscriptInSeq.sh
+./runManuscriptTotal.sh

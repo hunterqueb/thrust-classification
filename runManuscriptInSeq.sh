@@ -33,6 +33,11 @@
 #   CONFORMAL=0.05 ./runManuscriptInSeq.sh
 # --conformal adds no strAdd token, so the stem is unchanged; instead the completion marker moves
 # to the conformal block, and every existing log without one re-runs (all 135 -> ~57 hours).
+#
+# Joint 4-class models only (--mode joint): the manuscript compares in-sequence joint against the
+# whole-trajectory classifier, so the cascade is not trained. --mode is NOT in strAdd, so a re-run
+# overwrites the older joint+cascade logs of the same stem -- they are in git if the cascade numbers
+# are needed again. aggregateManuscript.py's Cascade columns go empty on these logs.
 
 set -euo pipefail
 
@@ -65,7 +70,7 @@ SCRIPT=scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py
 # costs on a localization task.
 COMMON=(
     --systems "$SYSTEMS"
-    --mode all
+    --mode joint
     --transformer
     --cnn
     --standardize
@@ -74,17 +79,17 @@ COMMON=(
     --minirocket
     --save
 )
-# MiniRocket is dispatched last in main(), and its conformal block prints after its cascade report,
-# so the marker is always the last thing a complete run writes.
-MARKER="MiniRocket Cascade Inference Time"
+# MiniRocket is dispatched last in main(), and in joint mode its joint report (or, under
+# --conformal, its joint conformal block) is the last thing a complete run writes.
+MARKER="MiniRocket (joint) Validation"
 # With --conformal --save each model's raw scores also go to scores/<stem>/ for
-# scripts/two_body/uncertaintyReport.py; MiniRocket's cascade file is written last, so a log whose
+# scripts/two_body/uncertaintyReport.py; MiniRocket's joint file is written last, so a log whose
 # conformal block predates the score dump (or whose run died while writing it) re-runs.
 SCORES_LAST=""
 if [ -n "$CONFORMAL" ]; then
     COMMON+=(--conformal "$CONFORMAL")
-    MARKER="MiniRocket Cascade Uncertainty"
-    SCORES_LAST="MiniRocket_Cascade.npz"
+    MARKER="MiniRocket Joint Uncertainty"
+    SCORES_LAST="MiniRocket_Joint.npz"
 fi
 
 FAILED=""
