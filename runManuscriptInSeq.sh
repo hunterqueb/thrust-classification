@@ -52,10 +52,20 @@ PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
 CONFORMAL="${CONFORMAL:-0.05}"   # miscoverage alpha, 0.05 = 95% coverage; empty = off
+# Input scaling: standardize (train-split z-score, the manuscript default) or norm (--norm: a / Earth
+# radius under --OE, non-dimensional ECI otherwise, energy over a reference value; runManuscriptInSeqNorm.sh).
+# Norm runs carry Norm_ in the stem, so they never overwrite the standardize logs, and every aggregator
+# drops them (aggregateManuscript.EXCLUDE_TOKENS) -- the parse step is skipped for them below.
+SCALING="${SCALING:-standardize}"
+case "$SCALING" in
+    standardize) SCALE_TOK="" ;;
+    norm)        SCALE_TOK="Norm_" ;;
+    *) echo "SCALING must be standardize or norm, got: $SCALING" >&2; exit 1 ;;
+esac
 
 SCRIPT=scripts/two_body/mambaTimeSeriesSeqClassificationGMATThrusts.py
 
-# --standardize on BOTH feature arms (not just the OE one) so the two arms differ only in the
+# --$SCALING (--standardize by default) on BOTH feature arms (not just the OE one) so the two arms differ only in the
 # feature set. LightGBM is on by default -- do NOT pass --no-classic. No xgboost/catboost/rf/
 # extratrees/mlp: they roughly double wall clock for baselines the paper doesn't use.
 # --eval-test so in-distribution cells report the held-out split rather than the validation split
@@ -73,7 +83,7 @@ COMMON=(
     --mode joint
     --transformer
     --cnn
-    --standardize
+    "--$SCALING"
     --loss-scheme inverse
     --eval-test
     --minirocket
@@ -122,9 +132,9 @@ run_one() {   # train test feat propMin seed
         evaltest_tok="EvalTest_"
     fi
 
-    # Mirrors strAdd exactly (training script ~:405-445). Token order: features, OnePass, Test,
-    # EvalTest, Seed -- Seed always last.
-    local stem="${propMin}min${SYSTEMS}${feat_tok}${EXTRA_TOK}${test_tok}${evaltest_tok}Seed${seed}"
+    # Mirrors strAdd exactly (training script ~:318-364). Token order: features, Norm (--standardize
+    # has no token), OnePass, Test, EvalTest, Seed -- Seed always last.
+    local stem="${propMin}min${SYSTEMS}${feat_tok}${SCALE_TOK}${EXTRA_TOK}${test_tok}${evaltest_tok}Seed${seed}"
     local log="gmat/data/seqClassification/${train}/${propMin}min-${SYSTEMS}/${stem}.log"
 
     # Completion marker, not mere existence: --save opens the log 'w' at startup, so an interrupted
@@ -171,7 +181,11 @@ echo
 echo "ran=${DONE} skipped=${SKIPPED}"
 [ -n "$FAILED" ] && echo "FAILED:${FAILED}"
 
-if [ "$SKIP_PARSE" = 1 ]; then exit 0; fi
+if [ "$SKIP_PARSE" = 1 ] || [ "$DRY_RUN" = 1 ]; then exit 0; fi
+if [ "$SCALING" != standardize ]; then
+    echo "SCALING=$SCALING: skipping the parse/aggregate step (the manuscript tables are standardize-only)"
+    exit 0
+fi
 
 # Confidence intervals + selective classification from the saved scores -> manuscript_tables/
 # uncertainty_*.csv, which aggregateManuscript.py turns into t9_ci_* / t10_selective_*.

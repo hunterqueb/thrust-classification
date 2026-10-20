@@ -92,12 +92,12 @@ def _dumpPredictions(path: Path, y, pred, u, pad):
 
 
 def collect(root: Path, dump: bool) -> list[dict]:
-    from aggregateManuscript import E2E, JOINT, SEED_RE, _config
+    from aggregateManuscript import E2E, JOINT, _config, manuscript_stem
     stage = {"Joint": JOINT, "Cascade": E2E, "": "whole_trajectory"}
     runs = []
     for run_dir in sorted(root.glob("*/*min-*/scores/*")):
         stem = run_dir.name
-        if not run_dir.is_dir() or not SEED_RE.search(stem) or "OnePass_" in stem:
+        if not run_dir.is_dir() or not manuscript_stem(stem):
             continue
         cfg = _config(stem, run_dir.relative_to(root).as_posix())
         files = sorted(run_dir.glob("*.npz"))

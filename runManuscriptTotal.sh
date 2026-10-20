@@ -43,18 +43,28 @@ PYTHON="${PYTHON:-python}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_PARSE="${SKIP_PARSE:-0}"
 CONFORMAL="${CONFORMAL:-0.05}"   # miscoverage alpha, 0.05 = 95% coverage; empty = off
+# Input scaling: standardize (train-split z-score, the manuscript default) or norm (--norm: a / Earth
+# radius under --OE, non-dimensional ECI otherwise, energy over a reference value; runManuscriptTotalNorm.sh).
+# Norm runs carry Norm_ in the stem, so they never overwrite the standardize logs, and every aggregator
+# drops them (aggregateManuscript.EXCLUDE_TOKENS) -- the parse step is skipped for them below.
+SCALING="${SCALING:-standardize}"
+case "$SCALING" in
+    standardize) SCALE_TOK="Std_" ;;
+    norm)        SCALE_TOK="Norm_" ;;
+    *) echo "SCALING must be standardize or norm, got: $SCALING" >&2; exit 1 ;;
+esac
 
 SCRIPT=scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py
 
 # LSTM (now Bi-LSTM), Mamba (now Bi-Mamba) and LightGBM run by default; the other three are opt-in.
-# --standardize (not --norm) on every arm, no noise, default 0.7 train ratio and --eval-test, all
-# to match the in-sequence sweep.
+# --$SCALING on every arm (--standardize by default), no noise, default 0.7 train ratio and
+# --eval-test, all to match the in-sequence sweep.
 COMMON=(
     --systems "$SYSTEMS"
     --transformer
     --cnn
     --minirocket
-    --standardize
+    "--$SCALING"
     --eval-test
     --seq-data
     --save
@@ -80,7 +90,7 @@ run_one() {   # train test feat propMin seed
     local train=$1 test=$2 feat=$3 propMin=$4 seed=$5
     local feat_args=() feat_tok="" test_args=() test_tok="" evaltest_tok=""
 
-    # strAdd token order is SeqData_, Energy_, J2Energy_, ResidLadder{n}_, OE_, Std_ -- mirror it
+    # strAdd token order is SeqData_, Energy_, J2Energy_, ResidLadder{n}_, OE_, Norm_, Std_ -- mirror it
     # exactly or the resume check misses.
     case "$feat" in
         phys)
@@ -99,8 +109,8 @@ run_one() {   # train test feat propMin seed
         evaltest_tok="EvalTest_"
     fi
 
-    # Mirrors strAdd: SeqData, features, Std, OnePass, Test, EvalTest, Seed -- Seed always last.
-    local stem="${propMin}min${SYSTEMS}SeqData_${feat_tok}Std_${EXTRA_TOK}${test_tok}${evaltest_tok}Seed${seed}"
+    # Mirrors strAdd: SeqData, features, Norm|Std, OnePass, Test, EvalTest, Seed -- Seed always last.
+    local stem="${propMin}min${SYSTEMS}SeqData_${feat_tok}${SCALE_TOK}${EXTRA_TOK}${test_tok}${evaltest_tok}Seed${seed}"
     local log="gmat/data/classification/${train}/${propMin}min-${SYSTEMS}/${stem}.log"
 
     # Completion marker: the CNN is the last model main() runs, so a partial log (--save opens it
@@ -144,6 +154,10 @@ echo "ran=${DONE} skipped=${SKIPPED}"
 [ -n "$FAILED" ] && echo "FAILED:${FAILED}"
 
 if [ "$SKIP_PARSE" = 1 ] || [ "$DRY_RUN" = 1 ]; then exit 0; fi
+if [ "$SCALING" != standardize ]; then
+    echo "SCALING=$SCALING: skipping the parse/aggregate step (the manuscript tables are standardize-only)"
+    exit 0
+fi
 
 # Selective classification + conformal-rate CIs from the saved scores -> manuscript_tables/
 # total_uncertainty_*.csv, which aggregateManuscriptTotal.py turns into total_t10_selective_*.

@@ -29,8 +29,8 @@ HERE = Path(__file__).resolve().parent
 CLASS_DIR = HERE.parent / "classification"
 sys.path.insert(0, str(CLASS_DIR))
 sys.path.insert(0, str(HERE.parents[2] / "scripts" / "two_body"))
-from aggregateManuscript import (JOINT, RPF1, SEED_RE, _config, complexity_legend,  # noqa: E402
-                                 feat_label, load, model_order, rpf1_table)
+from aggregateManuscript import (JOINT, RPF1, _config, complexity_legend, feat_label,  # noqa: E402
+                                 load, manuscript_stem, model_order, rpf1_table)
 from aggregateManuscriptTotal import MODEL_NAME, STAGE, load_total  # noqa: E402
 from bootstrapCI import confusionStat, expandConfusion, hierarchicalCI  # noqa: E402
 from displayLogData import RE_VAL_ACC, iter_models, parse_confusion_matrix  # noqa: E402
@@ -76,11 +76,11 @@ def complexity_table(tot: pd.DataFrame, cx: pd.DataFrame, train: str, feat: str)
 
 def total_ci(trains, n_boot: int, level: float) -> dict:
     """(*CELL, metric) -> (lo, hi) for the whole-trajectory runs, from each log's confusion matrix.
-    Same log set as load_total: every Seed<n> log under the train orbit's directory, minus OnePass."""
+    Same log set as load_total: every manuscript_stem log under the train orbit's directory."""
     runs = {}
     for train in trains:
         for log in sorted((CLASS_DIR / train).rglob("*.log")):
-            if not SEED_RE.search(log.stem) or "OnePass_" in log.stem:
+            if not manuscript_stem(log.stem):
                 continue
             cfg = _config(log.stem, log.relative_to(CLASS_DIR).as_posix())
             for model, blk in iter_models(log.read_text(errors="ignore")):

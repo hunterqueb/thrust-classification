@@ -31,6 +31,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classification"))
 from generateLatexTableCompact import format_cell, val_to_color  # noqa: E402,F401
 
 SEED_RE = re.compile(r"Seed(\d+)$")
+# Tokens _config does not extract, so a log carrying one would average into the cell of the run
+# without it: OnePass_ (1-epoch smoke tests) and Norm_ (runManuscript*Norm.sh, --norm instead of
+# --standardize -- the in-sequence stem has no token for --standardize to tell the two apart).
+EXCLUDE_TOKENS = ("OnePass_", "Norm_")
+
+
+def manuscript_stem(stem: str) -> bool:
+    """The one filter every log/score consumer applies: a seeded sweep run, minus EXCLUDE_TOKENS."""
+    return bool(SEED_RE.search(stem)) and not any(t in stem for t in EXCLUDE_TOKENS)
 TEST_RE = re.compile(r"Test_([A-Za-z][A-Za-z0-9\-/]*)_")
 PROP_RE = re.compile(r"^(\d+)min")
 KEYS = ["feat", "train", "test", "propMin", "model", "eval_stage"]
@@ -118,13 +127,10 @@ def load(pattern: str, rename_models: dict | None = None) -> pd.DataFrame:
         raise SystemExit(f"no CSVs matched {pattern!r} -- run the sweep's parse step first")
     df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
     df = df[df["log_stem"].str.contains(r"Seed\d+$", regex=True)].copy()
-    # OnePass runs are 1-epoch smoke tests. _config maps them onto the SAME cell as the real run
-    # with those settings (the OnePass_ token is not part of the config it extracts), so without
-    # this they would silently average into manuscript numbers.
     n_before = len(df)
-    df = df[~df["log_stem"].str.contains("OnePass_")].copy()
+    df = df[df["log_stem"].map(manuscript_stem)].copy()
     if len(df) < n_before:
-        print(f"  (excluded {n_before - len(df)} rows from --one-pass smoke-test logs)")
+        print(f"  (excluded {n_before - len(df)} rows from {'/'.join(EXCLUDE_TOKENS)} logs)")
     if df.empty:
         raise SystemExit(f"{pattern!r} matched files, but none carried a Seed<n> stem")
     cfg = pd.DataFrame([_config(s, r) for s, r in zip(df["log_stem"], df["log_relpath"])],
@@ -394,10 +400,10 @@ def parse_conformal(text: str) -> list[dict]:
 
 
 def load_conformal(pattern: str = "*/*min-*/*.log") -> pd.DataFrame:
-    """Same Seed<n> / OnePass filtering as load(), applied to log paths."""
+    """Same manuscript_stem filtering as load(), applied to log paths."""
     rows = []
     for p in sorted(Path(".").glob(pattern)):
-        if not SEED_RE.search(p.stem) or "OnePass_" in p.stem:
+        if not manuscript_stem(p.stem):
             continue
         cfg = _config(p.stem, p.as_posix())
         rows += [{**cfg, **r} for r in parse_conformal(p.read_text(errors="replace"))]
@@ -779,6 +785,9 @@ def _selfcheck() -> None:
     assert SEED_RE.search(_suffix("30min1500Energy_OE")) is None
     # A OnePass smoke log parses to the SAME config as the real run it shadows -- which is exactly
     # why load() drops it by stem rather than trusting _config to tell them apart.
+    assert manuscript_stem("30min1500Energy_J2Energy_OE_EvalTest_Seed0")
+    assert not manuscript_stem("30min1500Energy_J2Energy_OE_Norm_Test_geo_Seed0")
+    assert not manuscript_stem("30min1500SeqData_OnePass_EvalTest_Seed0")
     assert (_config("10min1500Energy_J2Energy_OE_OnePass_EvalTest_Seed0", "leo/x/y.log")
             == _config("10min1500Energy_J2Energy_OE_EvalTest_Seed0", "leo/x/y.log"))
     assert model_order(["MAMBA", "LightGBM", "CNN", "XGBoost", "LSTM"]) == [
