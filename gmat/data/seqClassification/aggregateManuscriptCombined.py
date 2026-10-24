@@ -5,13 +5,13 @@ One table per train->test arm x feature set, in the seq_*_jc.tex layout: whole-t
 left, in-sequence joint on the right. The cascade is left out. Run after both sweeps' parse steps:
 
     python aggregateManuscriptCombined.py --out-dir manuscript_tables
-    python aggregateManuscriptCombined.py --ci          # adds a [lo, hi] row under each model
+    python aggregateManuscriptCombined.py --ci          # adds each cell's 95% interval as $^{+up}_{-down}$
 
 --ci intervals are a hierarchical percentile bootstrap (seeds, then eval trajectories within each
 seed, stratified by thrust type; scripts/two_body/bootstrapCI.py) on both halves:
   Total Sequence  straight from each log's confusion matrix -- its cells count trajectories, so
                   nothing beyond the logs is needed.
-  In Sequence     from manuscript_tables/uncertainty_ci_long.csv, written by
+  In Sequence     from <out-dir>/uncertainty_ci_long.csv, written by
                   `scripts/two_body/uncertaintyReport.py --task seq` from the scores a
                   CONFORMAL=<alpha> ./runManuscriptInSeq.sh sweep saves. The logged confusion matrix
                   counts FRAMES, which are correlated within a trajectory, so bootstrapping it would
@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 CLASS_DIR = HERE.parent / "classification"
 sys.path.insert(0, str(CLASS_DIR))
 sys.path.insert(0, str(HERE.parents[2] / "scripts" / "two_body"))
-from aggregateManuscript import (JOINT, RPF1, _config, complexity_legend, feat_label,  # noqa: E402
+from aggregateManuscript import (JOINT, RPF1, _config, add_subset_arg, apply_subset, complexity_legend, feat_label,  # noqa: E402
                                  load, manuscript_stem, model_order, rpf1_table)
 from aggregateManuscriptTotal import MODEL_NAME, STAGE, load_total  # noqa: E402
 from bootstrapCI import confusionStat, expandConfusion, hierarchicalCI  # noqa: E402
@@ -37,7 +37,6 @@ from displayLogData import RE_VAL_ACC, iter_models, parse_confusion_matrix  # no
 from displaySeqLogData import BIG_O_BY_MODEL, _model_key  # noqa: E402
 
 APPROACHES = {STAGE: "Total Sequence", JOINT: "In Sequence"}
-SEQ_CI_CSV = HERE / "manuscript_tables" / "uncertainty_ci_long.csv"
 CELL = ["train", "test", "feat", "propMin", "model", "eval_stage"]
 
 # Whole-trajectory classic models see the flattened trajectory once, not a Hankel window per
@@ -97,17 +96,19 @@ def total_ci(trains, n_boot: int, level: float) -> dict:
     return out
 
 
-def seq_ci(level: float) -> dict:
-    """(*CELL, metric) -> (lo, hi) for the in-sequence joint runs, from uncertaintyReport.py."""
+def seq_ci(level: float, out_dir: Path) -> dict:
+    """(*CELL, metric) -> (lo, hi) for the in-sequence joint runs, from the uncertainty_ci_long.csv
+    uncertaintyReport.py wrote to this run's --out-dir."""
+    SEQ_CI_CSV = out_dir / "uncertainty_ci_long.csv"
     if not SEQ_CI_CSV.exists():
         print(f"  ! {SEQ_CI_CSV} missing -- In Sequence CIs print '--'. Run the in-sequence sweep with "
-              f"CONFORMAL=<alpha>, then scripts/two_body/uncertaintyReport.py --task seq")
+              f"CONFORMAL=<alpha>, then scripts/two_body/uncertaintyReport.py --task seq --out-dir {out_dir}")
         return {}
     d = pd.read_csv(SEQ_CI_CSV)
     d = d[(d.eval_stage == JOINT) & np.isclose(d.level, level)]
     if d.empty:
         print(f"  ! no joint rows at level {level} in {SEQ_CI_CSV} -- rerun uncertaintyReport.py --ci-level {level}")
-    return {tuple(r[c] for c in CELL) + (r.metric,): (r.lo, r.hi) for r in d.itertuples()}
+    return {tuple(getattr(r, c) for c in CELL) + (r.metric,): (r.lo, r.hi) for r in d.itertuples()}
 
 
 def main() -> None:
@@ -119,10 +120,12 @@ def main() -> None:
     ap.add_argument("--no-color", action="store_true", help="drop \\cellcolor")
     ap.add_argument("--color-lo", type=float, default=0.25)
     ap.add_argument("--color-hi", type=float, default=0.75)
-    ap.add_argument("--ci", action="store_true", help="add bootstrap CI rows (see module docstring)")
+    ap.add_argument("--ci", action="store_true", help="add bootstrap CIs to each cell (see module docstring)")
     ap.add_argument("--ci-level", type=float, default=0.95)
     ap.add_argument("--n-boot", type=int, default=2000)
+    add_subset_arg(ap)
     a = ap.parse_args()
+    apply_subset(a, ap)
 
     # Both loaders glob relative to their own sweep directory.
     with contextlib.chdir(CLASS_DIR):
@@ -135,9 +138,10 @@ def main() -> None:
 
     ci, ci_note = {}, ""
     if a.ci:
-        ci = {**total_ci(sorted(tot.train.unique()), a.n_boot, a.ci_level), **seq_ci(a.ci_level)}
-        ci_note = (f"Brackets: {a.ci_level:.0%} hierarchical bootstrap interval over seeds and "
-                   f"evaluation trajectories.").replace("%", "\\%")
+        ci = {**total_ci(sorted(tot.train.unique()), a.n_boot, a.ci_level), **seq_ci(a.ci_level, a.out_dir)}
+        ci_note = (f"Super/subscripts: distance from the mean to the upper/lower bound of the "
+                   f"{a.ci_level:.0%} hierarchical bootstrap interval over seeds and evaluation "
+                   f"trajectories.").replace("%", "\\%")
 
     a.out_dir.mkdir(parents=True, exist_ok=True)
     arms = set(zip(tot.train, tot.test, tot.feat)) & set(zip(seq.train, seq.test, seq.feat))
