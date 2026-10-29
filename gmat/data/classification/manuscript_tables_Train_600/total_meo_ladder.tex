@@ -1,0 +1,27 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\ifdim\width>\textwidth\textwidth\else\width\fi}{!}{%
+\begin{tabular}{l ccc}
+\toprule
+ & \multicolumn{3}{c}{\textbf{Whole-trajectory}} \\
+\cmidrule(lr){2-4}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} \\
+\cmidrule(lr){2-4}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{LightGBM} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 \\
+\textbf{MiniRocket} & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 & \cellcolor[HTML]{51CF66}0.99 \\
+\textbf{CNN} & \cellcolor[HTML]{51CF66}0.92 & \cellcolor[HTML]{51CF66}0.92 & \cellcolor[HTML]{51CF66}0.92 \\
+\textbf{LSTM} & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 & \cellcolor[HTML]{51CF66}0.98 \\
+\textbf{MAMBA} & \cellcolor[HTML]{51CF66}0.79 & \cellcolor[HTML]{51CF66}0.79 & \cellcolor[HTML]{51CF66}0.79 \\
+\textbf{TRANSFORMER} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} & \cellcolor[HTML]{51CF66}\textbf{0.99} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Whole-trajectory macro Recall (R), Precision (P), and F1, MEO train and test, OE + Acceleration Residual features, at 10 minutes. Mean over 1 seeds; per-seed spread in eval\_long.csv. Bold = best per approach/time/metric. Cell colour: red\,=\,low, green\,=\,high.}
+\label{tab:total_meo_ladder}
+\end{table}

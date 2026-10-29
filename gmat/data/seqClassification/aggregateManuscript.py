@@ -32,14 +32,42 @@ from generateLatexTableCompact import format_cell, val_to_color  # noqa: E402,F4
 
 SEED_RE = re.compile(r"Seed(\d+)$")
 # Tokens _config does not extract, so a log carrying one would average into the cell of the run
-# without it: OnePass_ (1-epoch smoke tests) and Norm_ (runManuscript*Norm.sh, --norm instead of
-# --standardize -- the in-sequence stem has no token for --standardize to tell the two apart).
-EXCLUDE_TOKENS = ("OnePass_", "Norm_")
+# without it: OnePass_ (1-epoch smoke tests), Norm_ (runManuscript*Norm.sh, --norm instead of
+# --standardize -- the in-sequence stem has no token for --standardize to tell the two apart) and
+# Train_ (TRAIN_RATIO != 0.7, e.g. runManuscriptExperiment_low.sh).
+EXCLUDE_TOKENS = ("OnePass_", "Norm_", "Train_")
+
+
+# --subset: aggregate ONLY the logs carrying this token (e.g. Train_600) instead of excluding them.
+SUBSET = ""
 
 
 def manuscript_stem(stem: str) -> bool:
-    """The one filter every log/score consumer applies: a seeded sweep run, minus EXCLUDE_TOKENS."""
-    return bool(SEED_RE.search(stem)) and not any(t in stem for t in EXCLUDE_TOKENS)
+    """The one filter every log/score consumer applies: a seeded sweep run, minus EXCLUDE_TOKENS --
+    or, with SUBSET set, only runs carrying SUBSET (still minus the other tokens)."""
+    if not SEED_RE.search(stem):
+        return False
+    if SUBSET:
+        # Whole-token match, so Train_600 does not also pick up Train_6000. On the suffix, because an
+        # ECI stem has no feature tokens: 30min1500Train_600_... puts the token right after 1500.
+        return (bool(re.search(rf"(^|_){re.escape(SUBSET)}(_|$)", _suffix(stem)))
+                and not any(t in stem for t in EXCLUDE_TOKENS if not SUBSET.startswith(t)))
+    return not any(t in stem for t in EXCLUDE_TOKENS)
+
+
+def add_subset_arg(ap: argparse.ArgumentParser) -> None:
+    ap.add_argument("--subset", default="",
+                    help="aggregate ONLY logs whose stem carries this token, e.g. Train_600; "
+                         "the default --out-dir becomes <out-dir>_<token> so the main tables survive")
+
+
+def apply_subset(a: argparse.Namespace, ap: argparse.ArgumentParser) -> None:
+    global SUBSET
+    SUBSET = a.subset
+    if SUBSET and a.out_dir == ap.get_default("out_dir"):
+        a.out_dir = a.out_dir.with_name(f"{a.out_dir.name}_{SUBSET}")
+    if SUBSET:
+        print(f"  (subset {SUBSET}: only those logs, writing to {a.out_dir})")
 TEST_RE = re.compile(r"Test_([A-Za-z][A-Za-z0-9\-/]*)_")
 PROP_RE = re.compile(r"^(\d+)min")
 KEYS = ["feat", "train", "test", "propMin", "model", "eval_stage"]
@@ -132,7 +160,8 @@ def load(pattern: str, rename_models: dict | None = None) -> pd.DataFrame:
     if len(df) < n_before:
         print(f"  (excluded {n_before - len(df)} rows from {'/'.join(EXCLUDE_TOKENS)} logs)")
     if df.empty:
-        raise SystemExit(f"{pattern!r} matched files, but none carried a Seed<n> stem")
+        raise SystemExit(f"{pattern!r} matched files, but no Seed<n> log "
+                         + (f"carries {SUBSET!r} -- parse those logs first" if SUBSET else "is left"))
     cfg = pd.DataFrame([_config(s, r) for s, r in zip(df["log_stem"], df["log_relpath"])],
                        index=df.index)
     out = pd.concat([df, cfg], axis=1)
@@ -229,7 +258,7 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     this script's Joint/Cascade table.
 
     ci: optional (model, eval_stage, propMin, metric) -> (lo, hi) or None. When given, each model
-    row is followed by a small [lo, hi] row and ci_note is appended to the caption.
+    mean carries the interval as $^{+up}_{-down}$ and ci_note is appended to the caption.
     """
     approaches = approaches or APPROACH_LABEL
     what = what or ("Per-timestep macro Recall (R), Precision (P), and F1 for the joint 4-class "
@@ -277,11 +306,9 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
                                       and cell(model, st, pm, m) >= best[(st, pm, m)]),
                              use_color=use_color, decimals=decimals,
                              color_lo=color_lo, color_hi=color_hi)
+                 + ("" if ci is None else _ci_script(cell(model, st, pm, m), ci(model, st, pm, m), decimals))
                  for st, pm in blocks for m, _ in RPF1]
         rows.append(f"\\textbf{{{model}}} & " + " & ".join(cells) + r" \\")
-        if ci is not None:
-            rows.append(" & " + " & ".join(_ci_cell(ci(model, st, pm, m), decimals)
-                                           for st, pm in blocks for m, _ in RPF1) + r" \\")
 
     hdr = " & ".join(lbl for _ in blocks for _, lbl in RPF1)
     return (
@@ -304,12 +331,21 @@ def rpf1_table(ev: pd.DataFrame, train: str, test: str, feat: str, seeds: int,
     )
 
 
-def _ci_cell(lohi, decimals: int) -> str:
-    """[lo, hi] in scriptsize, leading zeros dropped so it stays about as wide as the mean above it."""
-    if lohi is None or any(pd.isna(v) for v in lohi):
-        return "{\\scriptsize --}"
-    lo, hi = (f"{v:.{decimals}f}".lstrip("0") or "0" for v in lohi)
-    return f"{{\\scriptsize [{lo}, {hi}]}}"
+def _ci_script(mean: float, lohi, decimals: int) -> str:
+    """Interval as asymmetric distances from the mean, $^{+up}_{-down}$, appended inside the mean's
+    cell so it shares its colour. Percentile bootstrap intervals are not symmetric, so not +/-.
+    Leading zeros dropped; clamped at 0 because the whole-trajectory bootstrap point is recomputed
+    from the confusion matrix and can sit a rounding hair outside the logged mean."""
+    if pd.isna(mean) or lohi is None or any(pd.isna(v) for v in lohi):
+        return ""
+    up, dn = (f"{max(v, 0.0):.{decimals}f}".lstrip("0") for v in (lohi[1] - mean, mean - lohi[0]))
+    return f"$^{{+{up}}}_{{-{dn}}}$"
+
+
+def _ci_selfcheck() -> None:
+    assert _ci_script(0.48, (0.39, 0.58), 2) == "$^{+.10}_{-.09}$", _ci_script(0.48, (0.39, 0.58), 2)
+    assert _ci_script(0.36, (0.3601, 0.37), 2) == "$^{+.01}_{-.00}$"       # lo above mean -> 0
+    assert _ci_script(float("nan"), (0.1, 0.2), 2) == _ci_script(0.5, None, 2) == ""
 
 
 COMPLEXITY_APPROACHES = ["Joint", "Cascade"]
@@ -578,7 +614,9 @@ def main() -> None:
     ap.add_argument("--color-hi", type=float, default=0.75)
     ap.add_argument("--no-plots", action="store_true", help="skip the box-plot PDF")
     ap.add_argument("--selfcheck", action="store_true")
+    add_subset_arg(ap)
     a = ap.parse_args()
+    apply_subset(a, ap)
     if a.selfcheck:
         return _selfcheck()
 
@@ -765,6 +803,7 @@ def _best_cascade(ev: pd.DataFrame, cmp_: pd.DataFrame, a) -> None:
 
 
 def _selfcheck() -> None:
+    _ci_selfcheck()
     assert _config("30min1500Energy_J2Energy_OE_Test_geo_Seed1", "leo/30min-1500/x.log") == {
         "train": "leo", "test": "geo", "propMin": 30, "feat": "phys", "seed": 1}
     assert _config("100min1500EvalTest_Seed2", "geo/100min-1500/x.log") == {
@@ -788,6 +827,15 @@ def _selfcheck() -> None:
     assert manuscript_stem("30min1500Energy_J2Energy_OE_EvalTest_Seed0")
     assert not manuscript_stem("30min1500Energy_J2Energy_OE_Norm_Test_geo_Seed0")
     assert not manuscript_stem("30min1500SeqData_OnePass_EvalTest_Seed0")
+    assert not manuscript_stem("30min1500Energy_J2Energy_OE_Train_600_EvalTest_Seed0")
+    global SUBSET
+    SUBSET = "Train_600"
+    assert manuscript_stem("30min1500Energy_J2Energy_OE_Train_600_EvalTest_Seed0")
+    assert not manuscript_stem("30min1500Energy_J2Energy_OE_EvalTest_Seed0")
+    assert not manuscript_stem("30min1500Energy_J2Energy_OE_Train_6000_EvalTest_Seed0")
+    assert manuscript_stem("30min1500Train_600_EvalTest_Seed0")              # ECI: no feature tokens
+    assert not manuscript_stem("30min1500Energy_J2Energy_OE_Norm_Train_600_Test_geo_Seed0")
+    SUBSET = ""
     assert (_config("10min1500Energy_J2Energy_OE_OnePass_EvalTest_Seed0", "leo/x/y.log")
             == _config("10min1500Energy_J2Energy_OE_EvalTest_Seed0", "leo/x/y.log"))
     assert model_order(["MAMBA", "LightGBM", "CNN", "XGBoost", "LSTM"]) == [

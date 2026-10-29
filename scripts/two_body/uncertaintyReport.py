@@ -135,6 +135,9 @@ def main() -> None:
     ap.add_argument("--n-boot", type=int, default=2000)
     ap.add_argument("--dump-predictions", action="store_true", help="per-sample CSVs (large for 100 min)")
     ap.add_argument("--selfcheck", action="store_true")
+    ap.add_argument("--subset", default="",
+                    help="only runs whose stem carries this token, e.g. Train_600 (as the aggregators' "
+                         "--subset); default --out-dir becomes <root>/manuscript_tables_<token>")
     a = ap.parse_args()
     if a.selfcheck:
         return _selfcheck()
@@ -142,7 +145,9 @@ def main() -> None:
         ap.error("--task is required")
     root, prefix = TASKS[a.task]
     root = a.root or root
-    out = a.out_dir or root / "manuscript_tables"
+    out = a.out_dir or root / ("manuscript_tables" + (f"_{a.subset}" if a.subset else ""))
+    import aggregateManuscript
+    aggregateManuscript.SUBSET = a.subset
 
     runs = collect(root, a.dump_predictions)
     if not runs:   # not an error: the sweep scripts call this unconditionally under CONFORMAL

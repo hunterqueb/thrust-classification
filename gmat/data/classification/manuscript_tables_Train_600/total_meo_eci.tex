@@ -1,0 +1,27 @@
+% Requires \usepackage[table]{xcolor} in LaTeX preamble.
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+
+\resizebox{\ifdim\width>\textwidth\textwidth\else\width\fi}{!}{%
+\begin{tabular}{l ccc}
+\toprule
+ & \multicolumn{3}{c}{\textbf{Whole-trajectory}} \\
+\cmidrule(lr){2-4}
+ & \multicolumn{3}{c}{\textbf{10 Minute}} \\
+\cmidrule(lr){2-4}
+\textbf{Model} & \textbf{R} & \textbf{P} & \textbf{F1} \\
+\midrule
+\textbf{LightGBM} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}\textbf{0.25} \\
+\textbf{MiniRocket} & \cellcolor[HTML]{FF6E69}\textbf{0.26} & \cellcolor[HTML]{FF6E6A}\textbf{0.26} & \cellcolor[HTML]{FF6B6B}0.24 \\
+\textbf{CNN} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.06 & \cellcolor[HTML]{FF6B6B}0.10 \\
+\textbf{LSTM} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.20 \\
+\textbf{MAMBA} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.24 \\
+\textbf{TRANSFORMER} & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.25 & \cellcolor[HTML]{FF6B6B}0.21 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Whole-trajectory macro Recall (R), Precision (P), and F1, MEO train and test, ECI features, at 10 minutes. Mean over 1 seeds; per-seed spread in eval\_long.csv. Bold = best per approach/time/metric. Cell colour: red\,=\,low, green\,=\,high.}
+\label{tab:total_meo_eci}
+\end{table}
