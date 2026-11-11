@@ -18,7 +18,7 @@ export TRAIN_RATIO=0.1
 PYTHON="${PYTHON:-python}"
 OUT_DIR="${OUT_DIR:-manuscript_tables_low}"
 N_BOOT="${N_BOOT:-2000}"
-ARMS="${ARMS:-leo:leo meo:meo geo:geo leo:geo geo:leo}"
+ARMS="${ARMS:-leo:leo meo:meo geo:geo leo:geo geo:leo leo:meo meo:leo}"
 SUBSET="Train_$(awk -v r="$TRAIN_RATIO" -v n="${SYSTEMS:-1500}" 'BEGIN { printf "%d", 4 * r * n }')"
 case "$OUT_DIR" in
     /*) ;;
