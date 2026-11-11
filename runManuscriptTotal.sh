@@ -53,6 +53,13 @@ case "$SCALING" in
     norm)        SCALE_TOK="Norm_" ;;
     *) echo "SCALING must be standardize or norm, got: $SCALING" >&2; exit 1 ;;
 esac
+# --train_ratio. Anything but 0.7 also sets val = train and test = the rest (so 0.1 -> 0.1/0.1/0.8)
+# and adds Train_<int(4*ratio*systems)>_ to the stem, which the aggregators drop like Norm_.
+TRAIN_RATIO="${TRAIN_RATIO:-0.7}"
+TRAIN_TOK=""
+if awk -v r="$TRAIN_RATIO" 'BEGIN { exit !(r != 0.7) }'; then
+    TRAIN_TOK="Train_$(awk -v r="$TRAIN_RATIO" -v n="$SYSTEMS" 'BEGIN { printf "%d", 4 * r * n }')_"
+fi
 
 SCRIPT=scripts/two_body/mambaTimeSeriesClassificationGMATThrusts.py
 
@@ -66,6 +73,7 @@ COMMON=(
     --minirocket
     "--$SCALING"
     --eval-test
+    --train_ratio "$TRAIN_RATIO"
     --seq-data
     --save
 )
@@ -109,8 +117,8 @@ run_one() {   # train test feat propMin seed
         evaltest_tok="EvalTest_"
     fi
 
-    # Mirrors strAdd: SeqData, features, Norm|Std, OnePass, Test, EvalTest, Seed -- Seed always last.
-    local stem="${propMin}min${SYSTEMS}SeqData_${feat_tok}${SCALE_TOK}${EXTRA_TOK}${test_tok}${evaltest_tok}Seed${seed}"
+    # Mirrors strAdd: SeqData, features, Norm|Std, OnePass, Train, Test, EvalTest, Seed -- Seed always last.
+    local stem="${propMin}min${SYSTEMS}SeqData_${feat_tok}${SCALE_TOK}${EXTRA_TOK}${TRAIN_TOK}${test_tok}${evaltest_tok}Seed${seed}"
     local log="gmat/data/classification/${train}/${propMin}min-${SYSTEMS}/${stem}.log"
 
     # Completion marker: the CNN is the last model main() runs, so a partial log (--save opens it
@@ -154,8 +162,9 @@ echo "ran=${DONE} skipped=${SKIPPED}"
 [ -n "$FAILED" ] && echo "FAILED:${FAILED}"
 
 if [ "$SKIP_PARSE" = 1 ] || [ "$DRY_RUN" = 1 ]; then exit 0; fi
-if [ "$SCALING" != standardize ]; then
-    echo "SCALING=$SCALING: skipping the parse/aggregate step (the manuscript tables are standardize-only)"
+if [ "$SCALING" != standardize ] || [ -n "$TRAIN_TOK" ]; then
+    echo "SCALING=$SCALING TRAIN_RATIO=$TRAIN_RATIO: skipping the parse/aggregate step" \
+         "(the manuscript tables are standardize at 0.7 only)"
     exit 0
 fi
 
